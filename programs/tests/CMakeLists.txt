@@ -1,0 +1,41 @@
+cmake_minimum_required(VERSION 3.20)
+
+find_package(GTest QUIET)
+
+file(GLOB files "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+
+message(STATUS "${CMAKE_CURRENT_SOURCE_DIR} : ")
+message(${files})
+
+foreach(file ${files})
+    get_filename_component(bfile ${file} NAME_WE)
+    # Skip gtest-dependent programs if gtest not found
+    if((${bfile} STREQUAL "test_coordinate_transformations" OR ${bfile} STREQUAL "test_event_scheduler") AND NOT GTest_FOUND)
+        message(STATUS "Skipping ${bfile} — gtest not found")
+        continue()
+    endif()
+    add_executable(${bfile} ${bfile}.cpp)
+    install(TARGETS ${bfile} DESTINATION bin)
+endforeach()
+
+target_link_libraries(agent_simple_request CosmosAgent CosmosLog)
+target_link_libraries(attlvlh CosmosConvert CosmosSimulator CosmosPhysics)
+target_link_libraries(gauss_jackson_test CosmosAgent CosmosSimulator CosmosPhysics CosmosDeviceDisk)
+target_link_libraries(geod2eci2geod CosmosTime CosmosMath CosmosConvert CosmosNamespace)
+target_link_libraries(objread CosmosCad)
+target_link_libraries(observation_windows CosmosString CosmosConvert)
+target_link_libraries(poslvlh CosmosConvert CosmosSimulator CosmosPhysics)
+target_link_libraries(string_float_test CosmosNamespace CosmosString CosmosConvert)
+target_link_libraries(targetstruc_tests CosmosSimulator CosmosPhysics CosmosConvert CosmosData CosmosString)
+if(GTest_FOUND)
+    target_link_libraries(test_coordinate_transformations CosmosTime CosmosMath CosmosConvert GTest::GTest)
+    target_link_libraries(test_event_scheduler CosmosTime CosmosMath CosmosConvert GTest::GTest)
+endif()
+target_link_libraries(tle2orbit CosmosNamespace CosmosConvert)
+target_link_libraries(tledump CosmosConvert)
+target_link_libraries(tletest CosmosConvert)
+
+if(${BUILD_PROGRAMS_TESTS} MATCHES "YES")
+    add_subdirectory(unit_tests)
+    add_subdirectory(integration_tests)
+endif()

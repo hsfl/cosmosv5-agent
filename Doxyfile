@@ -1,0 +1,44 @@
+#---------------------------------------------------------------------------
+# COSMOS v4 — agent standalone documentation
+# Run from agent/: doxygen Doxyfile
+# HTML output: src/docs/agent/html/
+#---------------------------------------------------------------------------
+
+PROJECT_NAME           = "COSMOS v4 — agent"
+PROJECT_BRIEF          = "COSMOS agent layer"
+PROJECT_NUMBER         = 4.0
+OUTPUT_DIRECTORY       = ../docs/agent
+
+INPUT                  = ../docs/mainpage.dox                          ../docs/layer_agent.dox                          libraries
+
+RECURSIVE              = YES
+FILE_PATTERNS          = *.cpp *.h *.hpp *.dox *.md
+EXCLUDE_PATTERNS       = */build/* */CMakeFiles/*
+INPUT_ENCODING         = UTF-8
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+
+SEARCH_INCLUDES        = YES
+INCLUDE_PATH           = ../thirdparty/libraries                          ../thirdparty/libraries/json11                          ../kernel/libraries                          ../micro-agent/libraries                          ../simulator/libraries                          ../agent/libraries                          ../modules/libraries                          ../ground-station/libraries
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_TREEVIEW      = YES
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO
+
+SOURCE_BROWSER         = YES
+SEARCHENGINE           = YES
+
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+
+QUIET                  = NO
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_LOGFILE           = ../docs/agent/doxygen_warnings.log
