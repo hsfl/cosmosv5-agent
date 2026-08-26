@@ -1,0 +1,3 @@
+[submodule "deps/simulator"]
+	path = deps/simulator
+	url = git@github.com:hsfl/cosmosv5-simulator.git
