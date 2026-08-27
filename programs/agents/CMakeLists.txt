@@ -26,9 +26,9 @@ target_link_libraries(agent_tunnel CosmosAgent CosmosDeviceSerial)
 target_link_libraries(agent_tunnel2 CosmosAgent CosmosDeviceSerial)
 
 # Read the contents of the default propagator setup files and generate a C++ header file
-file(READ "${COSMOS_SOURCE}/core/data/demo/sats.dat" SAT_FILE)
-file(READ "${COSMOS_SOURCE}/core/data/demo/targets.dat" TARGET_FILE)
-file(READ "${COSMOS_SOURCE}/core/data/demo/tle.dat" TLE_FILE)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/data/sats.dat" SAT_FILE)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/data/targets.dat" TARGET_FILE)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/data/tle.dat" TLE_FILE)
 
 # Generate header/source file with the file contents as a string literal
 # To be used by agent_propagator to write the default files to the realms folder if it doesn't already exist
