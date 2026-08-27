@@ -269,17 +269,17 @@ int32_t PosAccel(locstruc* loc, physicsstruc* phys)
 
     // Moon gravity
     // Calculate Satellite to Moon vector
-    bodypos.s = rv_sub( loc->pos.extra.sun2earth.s, loc->pos.extra.sun2moon.s);
-    ctpos = rv_sub(bodypos.s, loc->pos.eci.s);
+    bodypos.s = rv_sub(loc->pos.extra.sun2earth.s, loc->pos.extra.sun2moon.s);
+    ctpos = rv_sub(rv_smult(-1., bodypos.s), loc->pos.eci.s);
     radius = ctpos.norm();
     da = GMOON/(radius*radius*radius) * ctpos;
     loc->pos.eci.a = rv_add(loc->pos.eci.a, da.to_rv());
 
     // Adjust for acceleration of frame due to moon
     radius = length_rv(bodypos.s);
-    da = rv_smult(GMOON/(radius*radius*radius),bodypos.s);
+    da = rv_smult(GMOON/(radius*radius*radius), bodypos.s);
     tda -= da;
-    loc->pos.eci.a = rv_sub(loc->pos.eci.a, da.to_rv());
+    loc->pos.eci.a = rv_add(loc->pos.eci.a, da.to_rv());
 
     // Add thrust
     //            loc->pos.eci.a = rv_add(loc->pos.eci.a, rv_smult(1./phys->mass, phys->fpush.to_rv()));
@@ -829,6 +829,21 @@ locstruc shape2eci(double utc, double latitude, double longitude, double altitud
     loc.pos.geoc.s.col[2] = s3.z;
     loc.pos.geoc.v.col[2] = v3.z;
     pos_set_geoc(loc);
+
+    // The GEOC velocity formula is an approximation (cos(inclination) × r × ω)
+    // that leaves a ~15 m/s error in the ECI speed, making the orbit slightly
+    // elliptical and causing GJ to diverge after a few orbital periods.
+    // Correct pos.eci.v to be exactly sqrt(GM/r) in the tangential direction,
+    // preserving the orbital plane established by the rotations above.
+    {
+        double r_mag = length_rv(loc.pos.eci.s);
+        double v_circ = sqrt(GM / r_mag);
+        rvector L_hat = rv_normal(rv_cross(loc.pos.eci.s, loc.pos.eci.v));
+        rvector r_hat = rv_normal(loc.pos.eci.s);
+        rvector t_hat = rv_cross(L_hat, r_hat);
+        loc.pos.eci.v = rv_smult(v_circ, t_hat);
+        pos_set_eci(loc);
+    }
 
     return loc;
 }
@@ -5040,6 +5055,13 @@ int32_t GaussJacksonPositionPropagator::Update()
     kepstruc kep;
     double dea;
     quaternion q1;
+
+    // Central bin position should already be set; sync attitude from current state
+    // because step bins may have been initialized before the attitude propagator ran
+    // (GJ Init runs before IterativeAttitudePropagator Init), leaving att.icrf.s=(0,0,0,0).
+    // AttAccel with a zero quaternion produces NaN via Vector::normalize() on a zero vector,
+    // which then propagates through att.icrf.v into subsequent step bins.
+    step[order2].loc.att.icrf = currentinfo->node.loc.att.icrf;
 
     // Central bin should already be set
     PosAccel(step[order2].loc, currentinfo->node.phys);

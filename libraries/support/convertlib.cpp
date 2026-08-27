@@ -139,6 +139,23 @@ int32_t pos_extra(double utc, locstruc &loc)
         return 0;
     }
 
+    // Cross-node cache: gcrf2itrs, jpllib, jplpos depend only on UTC, not on satellite
+    // position. All nodes at the same timestep share identical results. pos_set_eci calls
+    // pos_clear first, which zeros extra.utc and defeats the per-loc guard above, so we
+    // need this second layer to avoid recomputing for every node in the formation.
+    // thread_local: SimRun (background) and Tick() (Qt thread) both call pos_extra
+    // concurrently. A plain static would race on cached_extra writes (extrapos is ~500
+    // bytes, spans multiple cache lines → torn reads possible). thread_local gives each
+    // thread its own cache with no synchronisation cost; the cross-node sharing still
+    // works within each thread's formation Propagate() loop.
+    thread_local double cached_utc = 0.;
+    thread_local extrapos cached_extra;
+    if (cached_utc == utc)
+    {
+        loc.pos.extra = cached_extra;
+        return 0;
+    }
+
     double tt = utc2tt(utc);
     if (tt <= 0.)
     {
@@ -177,6 +194,9 @@ int32_t pos_extra(double utc, locstruc &loc)
     tloc.pos.eci.s = rv_sub(loc.pos.extra.sun2moon.s, loc.pos.extra.sun2earth.s);
     pos_eci2geoc(tloc);
     loc.pos.extra.moongeo = tloc.pos.geod.s;
+
+    cached_utc = utc;
+    cached_extra = loc.pos.extra;
 
     //    pos_lvlh(utc, loc);
     return 0;
@@ -1378,8 +1398,16 @@ int32_t pos_eci2geoc(locstruc &loc)
     // Convert GEOC Position to GEOS
     pos_geoc2geos(loc);
 
-    // Convert ICRF attitude to ITRF
-    iretn = att_icrf2geoc(loc);
+    // Convert ICRF attitude to ITRF.
+    // att_icrf2geoc calls pos_extra(att.icrf.utc) internally. If att.icrf.utc is stale
+    // (e.g. attitude not propagated in propagatorv3), that call overwrites extra with
+    // matrices for the wrong epoch, corrupting the j2e used for gravity rotation.
+    // Save and restore extra so the position-epoch matrices survive.
+    {
+        extrapos saved_extra = loc.pos.extra;
+        iretn = att_icrf2geoc(loc);
+        loc.pos.extra = saved_extra;
+    }
     if (iretn < 0)
     {
         return iretn;
