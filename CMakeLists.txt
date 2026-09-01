@@ -11,7 +11,7 @@ set(COSMOS_SOURCE ${CMAKE_SOURCE_DIR}/..)
 set(COSMOS_LIBS pthread)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX "/home2/pilger/cosmos" CACHE PATH "Install prefix" FORCE)
+    set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/cosmos" CACHE PATH "Install prefix" FORCE)
 endif()
 
 include(cmake/use_cosmos_from_source.cmake)
