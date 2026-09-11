@@ -769,6 +769,11 @@ for (il=0; il<5; il++)
                     }
                     fname += "/general/pgm2000a_coef.txt";
                     fi = fopen(fname.c_str(),"r");
+                    if (fi == NULL)
+                    {
+                        cout << "could not load file " << fname << endl;
+                        return iretn;
+                    }
                     for (il=2; il<361; il++)
                     {
                         for (im=0; im<= il; im++)

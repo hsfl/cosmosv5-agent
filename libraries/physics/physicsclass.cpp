@@ -667,6 +667,11 @@ int32_t GravityParams(int16_t model)
             }
             fname += "/general/pgm2000a_coef.txt";
             fi = fopen(fname.c_str(),"r");
+            if (fi == nullptr)
+            {
+                cout << "could not load file " << fname << endl;
+                return GENERAL_ERROR_OPEN;
+            }
             for (il=2; il<361; il++)
             {
                 for (im=0; im<= il; im++)

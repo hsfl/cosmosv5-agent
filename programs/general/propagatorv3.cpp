@@ -80,6 +80,32 @@ int main(int argc, char *argv[])
     agent->add_request("set_torque", request_set_torque, "nodename {torque}", "Set JSON Vector of torque for Node nodename");
     agent->add_request("dump_node", request_dump_node, "nodename", "Dump description for Node nodename");
 
+    // Verify resources are available before attempting physics initialization.
+    // Without them the gravitational model cannot be loaded and propagation fails silently.
+    {
+        string resources_path;
+        iretn = get_cosmosresources(resources_path);
+        if (iretn < 0 || resources_path.empty())
+        {
+            fprintf(stderr, "Error: COSMOS resources directory not found (error %d).\n", iretn);
+            fprintf(stderr, "Set the COSMOS or COSMOSRESOURCES environment variable to point at the resources directory,\n");
+            fprintf(stderr, "or run 'cmake --install' from the cosmosv5 build directory to install them to %s/resources.\n", getenv("HOME") ? getenv("HOME") : "~");
+            agent->shutdown();
+            exit(GENERAL_ERROR_EMPTY);
+        }
+        string grav_file = resources_path + "/general/egm2008_coef.txt";
+        FILE *fp = fopen(grav_file.c_str(), "r");
+        if (fp == nullptr)
+        {
+            fprintf(stderr, "Error: Gravity model file not found: %s\n", grav_file.c_str());
+            fprintf(stderr, "Run 'cmake --install' from the cosmosv5 build directory to install resources,\n");
+            fprintf(stderr, "or set COSMOSRESOURCES to the resources/ directory in the cosmosv5 workspace.\n");
+            agent->shutdown();
+            exit(GENERAL_ERROR_EMPTY);
+        }
+        fclose(fp);
+    }
+
     sim = new Physics::Simulator();
     iretn = sim->GetError();
     if (iretn <0) {
