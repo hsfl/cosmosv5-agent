@@ -1,6 +1,7 @@
 #include "simulatorclass.h"
 #include "support/jsonclass.h"
 #include "support/stringlib.h"
+#include <set>
 
 namespace Cosmos
 {
@@ -405,6 +406,7 @@ int32_t Simulator::ParseOrbitFile(string filename)
         line.resize(1010);
         while (fgets((char *)line.data(), 1000, fp) != nullptr)
         {
+            if (line.front() == '#') { continue; }
             iretn = ParseOrbitString(line);
             if (iretn < 0)
             {
@@ -715,9 +717,9 @@ int32_t Simulator::ParseOrbitString(string args)
                   : values["a"].number_value();
             e_f = have_ecc ? values["e"].number_value() : 0.;
             flo_alt_m = a - FLO_RM;
-            std::fprintf(stderr, "[flo] Mode B: a=%.1f m  e=%.5f  i=%.2f°  "
-                         "raan=%.2f°  aop=%.2f°  ta=%.2f°\n",
-                         a, e_f, DEGOF(incl), DEGOF(raan), DEGOF(aop), DEGOF(ta));
+//            std::fprintf(stderr, "[flo] Mode B: a=%.1f m  e=%.5f  i=%.2f°  "
+//                         "raan=%.2f°  aop=%.2f°  ta=%.2f°\n",
+//                         a, e_f, DEGOF(incl), DEGOF(raan), DEGOF(aop), DEGOF(ta));
         }
         else if (!values["alt"].is_null() && have_ecc)
         {
@@ -725,9 +727,9 @@ int32_t Simulator::ParseOrbitString(string args)
             flo_alt_m = values["alt"].number_value();
             a         = FLO_RM + flo_alt_m;
             e_f       = values["e"].number_value();
-            std::fprintf(stderr, "[flo] Mode B (alt+e): alt=%.0f m  a=%.1f m  "
-                         "e=%.5f  i=%.2f°  raan=%.2f°  aop=%.2f°  ta=%.2f°\n",
-                         flo_alt_m, a, e_f, DEGOF(incl), DEGOF(raan), DEGOF(aop), DEGOF(ta));
+//            std::fprintf(stderr, "[flo] Mode B (alt+e): alt=%.0f m  a=%.1f m  "
+//                         "e=%.5f  i=%.2f°  raan=%.2f°  aop=%.2f°  ta=%.2f°\n",
+//                         flo_alt_m, a, e_f, DEGOF(incl), DEGOF(raan), DEGOF(aop), DEGOF(ta));
         }
         else
         {
@@ -735,9 +737,9 @@ int32_t Simulator::ParseOrbitString(string args)
             flo_alt_m = values["alt"].number_value();
             a         = FLO_RM + flo_alt_m;
             e_f       = flo_frozen_eccentricity(flo_alt_m, incl);
-            std::fprintf(stderr, "[flo] Mode A: alt=%.0f m  a=%.1f m  "
-                         "e_frozen=%.5f  i=%.2f°\n",
-                         flo_alt_m, a, e_f, DEGOF(incl));
+//            std::fprintf(stderr, "[flo] Mode A: alt=%.0f m  a=%.1f m  "
+//                         "e_frozen=%.5f  i=%.2f°\n",
+//                         flo_alt_m, a, e_f, DEGOF(incl));
         }
 
         // ── Convert Keplerian elements to ECI Cartesian ──────────────────────
@@ -784,16 +786,33 @@ int32_t Simulator::ParseOrbitString(string args)
         double Qzx = sw*sI;
         double Qzy = cw*sI;
 
-        initialloc.pos.eci.utc      = initialutc;
-        initialloc.pos.eci.s.col[0] = Qxx*rx_pf + Qxy*ry_pf;
-        initialloc.pos.eci.s.col[1] = Qyx*rx_pf + Qyy*ry_pf;
-        initialloc.pos.eci.s.col[2] = Qzx*rx_pf + Qzy*ry_pf;
-        initialloc.pos.eci.v.col[0] = Qxx*vx_pf + Qxy*vy_pf;
-        initialloc.pos.eci.v.col[1] = Qyx*vx_pf + Qyy*vy_pf;
-        initialloc.pos.eci.v.col[2] = Qzx*vx_pf + Qzy*vy_pf;
-        initialloc.pos.eci.a.col[0] = 0.;
-        initialloc.pos.eci.a.col[1] = 0.;
-        initialloc.pos.eci.a.col[2] = 0.;
+        // The Q rotation produced a vector in SELENOGRAPHIC axes (since
+        // incl/raan/aop are measured relative to Moon's equator/pole).
+        // Init() will copy pos.eci → pos.sci and call pos_sci(), so
+        // pos.eci must hold the selenocentric vector in J2000-ALIGNED
+        // (SCI) axes -- not selenographic body-fixed axes.
+        // Apply s2j (selenographic → SCI) at initialutc to get there.
+        pos_extra(initialutc, initialloc);   // populate s2j
+
+        rvector selc_s, selc_v;
+        selc_s.col[0] = Qxx*rx_pf + Qxy*ry_pf;
+        selc_s.col[1] = Qyx*rx_pf + Qyy*ry_pf;
+        selc_s.col[2] = Qzx*rx_pf + Qzy*ry_pf;
+        selc_v.col[0] = Qxx*vx_pf + Qxy*vy_pf;
+        selc_v.col[1] = Qyx*vx_pf + Qyy*vy_pf;
+        selc_v.col[2] = Qzx*vx_pf + Qzy*vy_pf;
+
+        initialloc.pos.eci.s   = rv_mmult(initialloc.pos.extra.s2j, selc_s);
+        initialloc.pos.eci.v   = rv_mmult(initialloc.pos.extra.s2j, selc_v);
+        initialloc.pos.eci.a   = rv_zero();
+        initialloc.pos.eci.utc = initialutc;
+
+//        std::fprintf(stderr, "[flo selg->sci] |eci.s|=%.1f km  "
+//                     "eci.s=(%.1f,%.1f,%.1f)  eci.v=(%.3f,%.3f,%.3f)\n",
+//                     length_rv(initialloc.pos.eci.s)/1000.,
+//                     initialloc.pos.eci.s.col[0], initialloc.pos.eci.s.col[1], initialloc.pos.eci.s.col[2],
+//                     initialloc.pos.eci.v.col[0], initialloc.pos.eci.v.col[1], initialloc.pos.eci.v.col[2]);
+//        std::fflush(stderr);
 
         // --- store FLO parameters for use in Propagate() ---
         flo_enabled        = true;
@@ -849,6 +868,7 @@ int32_t Simulator::ParseSatFile(string filename)
         line.resize(1010);
         while (fgets((char *)line.data(), 1000, fp) != nullptr)
         {
+            if (line.front() == '#') { continue; }
             iretn = ParseSatString(line);
             if (iretn < 0)
             {
@@ -1215,6 +1235,7 @@ int32_t Simulator::ParseTargetFile(string filename)
     line.resize(510);
     while (fgets((char *)line.data(), 500, fp) != nullptr)
     {
+        if (line.front() == '#') { continue; }
         iretn = ParseTargetString(line);
         if (iretn < 0)
         {
@@ -1657,7 +1678,7 @@ int32_t Simulator::Reset()
     return error;
 }
 
-int32_t Simulator::Propagate(double nextutc)
+int32_t Simulator::Propagate(double nextutc, bool enablethrust, bool enabletorque)
 {
     int iretn = 0;
     if (nextutc == 0.)
@@ -1667,6 +1688,14 @@ int32_t Simulator::Propagate(double nextutc)
     else {
         currentutc = nextutc;
     }
+
+    // Formation geometry + thrust: set loc_req.pos for children, then compute fpush.
+    if (enablethrust && cnodes.size() > 1 && !m_formationType.empty())
+    {
+        Formation(m_formationType, m_formationSpacing);
+        Thrust();
+    }
+
     for (auto &state : cnodes)
     {
         switch(state->ptype)
@@ -1752,13 +1781,23 @@ int32_t Simulator::Propagate(double nextutc)
         }
     }
 
+    // Use a copy of the mother's locstruc so that pos_geoc2lvlh's internal
+    // pos_set_geoc() call (which wipes and recomputes the first argument) does
+    // not corrupt the GJ integrator's primary ECI state variable.
+    locstruc mother_loc = cnodes[0]->currentinfo.node.loc;
     for (uint16_t i=1; i<cnodes.size(); ++i)
     {
-        pos_geoc2lvlh(cnodes[0]->currentinfo.node.loc, cnodes[i]->currentinfo.node.loc);
+        pos_geoc2lvlh(mother_loc, cnodes[i]->currentinfo.node.loc);
         cnodes[i]->currentinfo.node.loc.pos.lvlh.s = -cnodes[i]->currentinfo.node.loc.pos.lvlh.s;
         cnodes[i]->currentinfo.node.loc.pos.lvlh.v = -cnodes[i]->currentinfo.node.loc.pos.lvlh.v;
         cnodes[i]->currentinfo.node.loc.pos.lvlh.a = -cnodes[i]->currentinfo.node.loc.pos.lvlh.a;
     }
+
+    // Attitude control: slerp each node toward its desired pointing direction.
+    // Runs after position propagation so update_target() results are current.
+    if (enabletorque)
+        AttitudeStep();
+
     return iretn;
 }
 
@@ -1851,9 +1890,9 @@ int32_t Simulator::Target()
     int32_t iretn = 0;
     // uint32_t minlevel = 10000;
     // Synchronize progress of all targets
+    // update_target was already called for each node inside State::Propagate()
     for (uint16_t i=0; i<cnodes.size(); ++i)
     {
-        update_target(&cnodes[i]->currentinfo);
         for (uint16_t j=0; j<cnodes[i]->currentinfo.target.size(); ++j)
         {
             if (cnodes[i]->currentinfo.target[j].cover[0].count > targets[cnodes[i]->currentinfo.target[j].name].cover[0].count)
@@ -2178,6 +2217,137 @@ Simulator::StateList::const_iterator Simulator::GetNode(string name) const
 Simulator::StateList::const_iterator Simulator::GetEnd() const
 {
     return cnodes.end();
+}
+
+void Simulator::SetFormation(string type, double spacing)
+{
+    m_formationType    = type;
+    m_formationSpacing = spacing;
+}
+
+void Simulator::SetTracking(int mode)
+{
+    m_trackingMode = mode;
+}
+
+// Slerp `state`'s att.icrf so that `bodyAxis` (body frame, unit vector) points at
+// `targetDirIcrf` (ICRF, unit vector). Advances by one bang-bang time-step fraction.
+void Simulator::slewBodyAxis(Physics::State &state,
+                             const rvector  &bodyAxis,
+                             const rvector  &targetDirIcrf,
+                             double dt, double currentutc)
+{
+    qatt &catt        = state.currentinfo.node.loc.att.icrf;
+    double maxtorque  = state.currentinfo.node.phys.maxtorque;
+    const Vector &moi = state.currentinfo.node.phys.moi;
+    if (maxtorque <= 0.) return;
+
+    // Current direction of bodyAxis in ICRF frame.
+    rvector curDir = transform_q(q_conjugate(catt.s), bodyAxis);
+
+    double cosA = dot_rv(curDir, targetDirIcrf);
+    cosA = std::max(-1.0, std::min(1.0, cosA));
+    double angle = std::acos(cosA);
+    if (angle < 1e-9) return;
+
+    // Bang-bang slew time: t = 2*sqrt(angle * I_min / tau_max)
+    double I_min   = std::min({moi.x, moi.y, moi.z});
+    double t_slew  = 2.0 * std::sqrt(angle * I_min / maxtorque);
+    double stepAng = angle * std::min(1.0, dt / std::max(t_slew, dt));
+
+    // Rotation axis in ICRF (cross of current to target direction).
+    rvector axis = rv_normal(rv_cross(curDir, targetDirIcrf));
+
+    // Step rotation quaternion (in ICRF).
+    quaternion step_q;
+    double sha = std::sin(stepAng / 2.);
+    step_q.d.x = axis.col[0] * sha;
+    step_q.d.y = axis.col[1] * sha;
+    step_q.d.z = axis.col[2] * sha;
+    step_q.w = std::cos(stepAng / 2.);
+
+    // q_{ICRF→body}(new) = q_{ICRF→body}(old) * q_conjugate(step_q)
+    // (step_q rotates body→ICRF, conjugate reverses it into the ICRF→body map)
+    catt.s   = q_mult(catt.s, q_conjugate(step_q));
+    catt.utc = currentutc;
+    att_set_icrf(state.currentinfo.node.loc);
+}
+
+// Per-step attitude control: for each node, determine desired pointing direction
+// and slerp att.icrf toward it using bang-bang rate. Called from Propagate() when
+// enabletorque is true.
+void Simulator::AttitudeStep()
+{
+    // For mode 2 (nearest unclaimed), reset claims each step.
+    std::set<int> claimed;
+
+    for (int ni = 0; ni < (int)cnodes.size(); ++ni)
+    {
+        auto   &ci  = cnodes[ni]->currentinfo;
+        auto   &loc = ci.node.loc;
+
+        // ── 1. GS contact (type 1/2, highest priority) ───────────────────
+        // elto = satellite elevation as seen from target (ground looking up).
+        // elfrom is always negative for Earth-surface targets; use elto instead.
+        int   bestGS = -1;
+        float bestEl = 0.f;
+        for (int ti = 0; ti < (int)ci.target.size(); ++ti)
+        {
+            const auto &t = ci.target[ti];
+            if (t.type != 1 && t.type != 2) continue;
+            if (t.elto >= t.min && t.elto > bestEl) { bestGS = ti; bestEl = t.elto; }
+        }
+
+        if (bestGS >= 0)
+        {
+            rvector tdir = rv_normal(rv_sub(ci.target[bestGS].loc.pos.eci.s, loc.pos.eci.s));
+            slewBodyAxis(*cnodes[ni], rv_smult(-1., rv_unitz()), tdir, dt, currentutc);
+            continue;
+        }
+
+        // ── 2. Imaging target (type 5, tracking mode 1 or 2) ─────────────
+        if (m_trackingMode > 0)
+        {
+            int   bestTgt = -1;
+            float bestTEl = 0.f;
+            for (int ti = 0; ti < (int)ci.target.size(); ++ti)
+            {
+                const auto &t = ci.target[ti];
+                if (t.type != 5) continue;
+                if (t.elto <= 0.f) continue;          // satellite below horizon
+                if (m_trackingMode == 2 && claimed.count(ti)) continue;
+                if (t.elto > bestTEl) { bestTgt = ti; bestTEl = t.elto; }
+            }
+            if (bestTgt >= 0)
+            {
+                if (m_trackingMode == 2) claimed.insert(bestTgt);
+                rvector tdir = rv_normal(rv_sub(ci.target[bestTgt].loc.pos.eci.s, loc.pos.eci.s));
+                slewBodyAxis(*cnodes[ni], rv_smult(-1., rv_unitz()), tdir, dt, currentutc);
+                continue;
+            }
+        }
+
+        // ── 3. Sun pointing: average PV panel com = panel-normal in body ─
+        if (!ci.devspec.pvstrg.empty())
+        {
+            Vector panelSum;
+            for (const auto &pv : ci.devspec.pvstrg) panelSum += ci.pieces[pv.pidx].com;
+            double plen = panelSum.norm();
+            if (plen > 0.)
+            {
+                panelSum /= plen;
+                rvector panelBodyAxis{panelSum.x, panelSum.y, panelSum.z};
+
+                bool lunar = (loc.pos.extra.closest == COSMOS_MOON);
+                rvector sunDir = rv_normal(rv_smult(-1.,
+                    lunar ? loc.pos.extra.sun2moon.s : loc.pos.extra.sun2earth.s));
+
+                slewBodyAxis(*cnodes[ni], panelBodyAxis, sunDir, dt, currentutc);
+                continue;
+            }
+        }
+        // No pvstrg or no active target → leave LVLH attitude unchanged
+    }
 }
 
 int32_t Simulator::UpdatePush(string name, Vector fpush)
