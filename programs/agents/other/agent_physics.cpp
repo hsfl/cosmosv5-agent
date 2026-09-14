@@ -92,7 +92,7 @@ int main(int argc, char *argv[])
 
     order = 8;
 
-    sprintf(fname,"%s/state.ini",get_nodedir(node).c_str());
+    sprintf(fname,"%s/state.ini",get_nodedir(agent->cinfo->realm.name, node).c_str());
 
     if ((iretn=stat(fname,&fstat)) == 0 && (fdes=fopen(fname,"r")) != NULL)
     {
@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
     }
     else
     {
-        sprintf(fname,"%s/tle.ini",get_nodedir(node).c_str());
+        sprintf(fname,"%s/tle.ini",get_nodedir(agent->cinfo->realm.name, node).c_str());
         if ((iretn=stat(fname,&fstat)) == 0 && (iretn=load_lines(fname, agent->cinfo->tle)) > 0)
         {
             tline = get_line(0, agent->cinfo->tle);

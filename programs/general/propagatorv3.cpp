@@ -122,7 +122,7 @@ int main(int argc, char *argv[])
         Physics::Simulator::StateList::iterator sit = sim->GetNode(dump);
         if (sit != sim->cnodes.end())
         {
-            json_dump_node(&(*sit)->currentinfo);
+            json_dump_node(&(*sit)->currentinfo, realmname);
         }
         exit (1);
     }
@@ -340,33 +340,13 @@ int main(int argc, char *argv[])
                     }
                     if (jsonevent)
                     {
-                        json11::Json jobj = json11::Json::object({
-                            {"mtype", "event"},
-                            {"node", sim->cnodes[i]->currentinfo.node.name},
-                            {"utc", event.utc},
-                            {"name", event.name},
-                            {"type", static_cast<int>(event.type)},
-                            {"flag", static_cast<int>(event.flag)},
-                            {"el", event.el},
-                            {"az", event.az},
-                            {"pos", event.pos}
-                        });
+                        json11::Json jobj = json_event_payload(sim->cnodes[i]->currentinfo.node.name, event);
                         string output = jobj.dump();
                         printf("%s\n", output.c_str());
                     }
                     if (postevent)
                     {
-                        json11::Json jobj = json11::Json::object({
-                            {"mtype", "event"},
-                            {"node", sim->cnodes[i]->currentinfo.node.name},
-                            {"utc", event.utc},
-                            {"name", event.name},
-                            {"type", static_cast<int>(event.type)},
-                            {"flag", static_cast<int>(event.flag)},
-                            {"el", event.el},
-                            {"az", event.az},
-                            {"pos", event.pos}
-                        });
+                        json11::Json jobj = json_event_payload(sim->cnodes[i]->currentinfo.node.name, event);
                         string output = jobj.dump();
                         if (postevent)
                         {
@@ -478,23 +458,7 @@ int main(int argc, char *argv[])
                 sim->cnodes[i]->currentinfo.devspec.cpu[0].gib = static_cast <float>(deviceCpu.getVirtualMemoryUsed()/1073741824.);
                 sim->cnodes[i]->currentinfo.devspec.cpu[0].maxgib = static_cast <float>(deviceCpu.getVirtualMemoryTotal()/1073741824.);
                 sim->cnodes[i]->currentinfo.devspec.cpu[0].maxload = deviceCpu.getCpuCount();
-                json11::Json jobj = json11::Json::object({
-                    {"mtype", "soh"},
-                    {"utc", sim->cnodes[i]->currentinfo.node.utc},
-                    {"node", sim->cnodes[i]->currentinfo.node.name},
-                    {"pvstrg", sim->cnodes[i]->currentinfo.devspec.pvstrg},
-                    {"tsen", sim->cnodes[i]->currentinfo.devspec.tsen},
-                    {"closest", static_cast<int>(sim->cnodes[i]->currentinfo.node.loc.pos.extra.closest)},
-                    {(sim->cnodes[i]->currentinfo.node.loc.pos.extra.closest == COSMOS_MOON) ? "scipos" : "ecipos",
-                     (sim->cnodes[i]->currentinfo.node.loc.pos.extra.closest == COSMOS_MOON)
-                         ? sim->cnodes[i]->currentinfo.node.loc.pos.sci
-                         : sim->cnodes[i]->currentinfo.node.loc.pos.eci},
-                    {"alphaatt", sim->cnodes[i]->currentinfo.node.loc.att.icrf},
-                    {"powerin", sim->cnodes[i]->currentinfo.node.phys.powgen},
-                    {"powerout", sim->cnodes[i]->currentinfo.node.phys.powuse},
-                    {"load", sim->cnodes[i]->currentinfo.devspec.cpu[0].load / sim->cnodes[i]->currentinfo.devspec.cpu[0].maxload},
-                    {"memory", sim->cnodes[i]->currentinfo.devspec.cpu[0].gib / sim->cnodes[i]->currentinfo.devspec.cpu[0].maxgib}
-                });
+                json11::Json jobj = json_soh_payload(&sim->cnodes[i]->currentinfo);
                 string output = jobj.dump();
                 iretn = socket_post(data_channel_out, output.c_str());
                 // send_telem_to_cosmos_web(&sim->cnodes[i]->currentinfo);
@@ -1653,7 +1617,7 @@ int32_t request_dump_node(string &request, string &response, Agent *agent)
         Physics::Simulator::StateList::iterator sit = sim->GetNode(args[1]);
         if (sit != sim->cnodes.end())
         {
-            json_dump_node(&(*sit)->currentinfo);
+            json_dump_node(&(*sit)->currentinfo, realmname);
             response = args[1];
         }
     }

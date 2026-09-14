@@ -115,7 +115,7 @@ int main(int argc, char* argv[])
     {
         struct stat fstat;
         FILE* fdes;
-        fname = get_nodedir((node.c_str()));
+        fname = get_nodedir(agent->cinfo->realm.name, node);
         fname += "/state.ini";
         if ((iretn=stat(fname.c_str(), &fstat)) == 0 && (fdes=fopen(fname.c_str(),"r")) != NULL)
         {

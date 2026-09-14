@@ -134,14 +134,6 @@ Agent::Agent(string realm_name,
     }
     debug_log.Printf("Opened Subscribe channel\n");
 
-    if ((iretn=json_setup_node(node_name, cinfo)) != 0) {
-        error_value = iretn;
-        debug_log.Printf("Failed to set up Node %s\n", node_name.c_str());
-        shutdown();
-        return;
-    }
-    debug_log.Printf("Set Up Node %s\n", node_name.c_str());
-
     if ((iretn=json_setup_realm(realm_name, cinfo)) < 0 && iretn != COSMOS_GENERAL_ERROR_OPEN) {
         error_value = iretn;
         debug_log.Printf("Failed to set up Realm %s\n", realm_name.c_str());
@@ -149,6 +141,14 @@ Agent::Agent(string realm_name,
         return;
     }
     debug_log.Printf("Set Up Realm %s\n", realm_name.c_str());
+
+    if ((iretn=json_setup_node(node_name, realm_name, cinfo)) != 0) {
+        error_value = iretn;
+        debug_log.Printf("Failed to set up Node %s\n", node_name.c_str());
+        shutdown();
+        return;
+    }
+    debug_log.Printf("Set Up Node %s\n", node_name.c_str());
 
     cinfo->agent0.client = 1;
     cinfo->node.utc = 0.;
@@ -1995,7 +1995,7 @@ int32_t Agent::req_fullsoh(string &, string &response, Agent *agent) {
 
 //        int32_t Agent::req_jsondump(char *, char*, Agent *agent)
 int32_t Agent::req_jsondump(string &, string &, Agent *agent) {
-    json_dump_node(agent->cinfo);
+    json_dump_node(agent->cinfo, agent->cinfo->realm.name);
     return 0;
 }
 

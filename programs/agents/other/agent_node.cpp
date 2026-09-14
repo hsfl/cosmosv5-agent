@@ -139,17 +139,17 @@ int main(int argc, char *argv[])
 
 
 	// Check Node directory
-    if (get_nodedir(agent->cinfo->node.name).empty())
+    if (get_nodedir(agent->cinfo->realm.name, agent->cinfo->node.name).empty())
 	{
 		printf("Couldn't find Node directory %s\n",argv[1]);
 		exit (1);
 	}
 
 	// Find most recent day in archive
-    lastday = findlastday(agent->cinfo->node.name);
+    lastday = findlastday(agent->cinfo->realm.name, agent->cinfo->node.name);
 
 	// Find oldest day in archive
-    firstday = findfirstday(agent->cinfo->node.name);
+    firstday = findfirstday(agent->cinfo->realm.name, agent->cinfo->node.name);
 
 	printf("Found days %f to %f\n",firstday, lastday);
 
@@ -211,7 +211,7 @@ int main(int argc, char *argv[])
     while(agent->running())
 	{
         nextmjd += agent->cinfo->agent0.aprd/86400.;
-        if ((newlastday=findlastday(agent->cinfo->node.name)) != lastday)
+        if ((newlastday=findlastday(agent->cinfo->realm.name, agent->cinfo->node.name)) != lastday)
 		{
 
 		}

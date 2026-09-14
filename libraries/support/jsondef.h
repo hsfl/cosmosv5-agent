@@ -2110,6 +2110,36 @@ class sim_param	{
             jsonhandle handle;
             //! JSON Data Type
             uint16_t type;
+
+            /// Convert class contents to JSON object
+            /** Returns a json11 JSON object of the class
+        \return	A json11 JSON object containing every member variable within the class
+    */
+            json11::Json to_json() const {
+                return json11::Json::object {
+                    { "name" , name },
+                    { "handle" , handle },
+                    { "type" , type }
+                };
+            }
+
+            /// Set class contents from JSON string
+            /** Parses the provided JSON-formatted string and sets the class data. String should be formatted like the string returned from #to_json()
+        \param	s	JSON-formatted string to set class contents to
+        \return n/a
+    */
+            void from_json(const string& s) {
+                string error;
+                json11::Json p = json11::Json::parse(s,error);
+                if(error.empty()) {
+                    if(!p["name"].is_null())	{ name = p["name"].string_value(); }
+                    if(!p["handle"].is_null())	{ handle.from_json(p["handle"].dump()); }
+                    if(!p["type"].is_null())	{ type = p["type"].long_value(); }
+                } else {
+                    cerr<<"ERROR: <"<<error<<">"<<endl;
+                }
+                return;
+            }
         };
 
         //! Equation structure
@@ -5040,9 +5070,11 @@ union as a ::devicestruc.
 //                    { "normal_cnt" , normal_cnt },
                     { "triangle_cnt" , triangle_cnt },
                     { "face_cnt" , face_cnt },
+                    { "struc_cnt" , static_cast<int>(struc_cnt) },
                     { "vertices" , vertices },
                     { "triangles" , triangles },
                     { "faces" , faces },
+                    { "strucs" , strucs },
 //                    { "normals" , normals }
                 };
             }
@@ -5091,6 +5123,7 @@ union as a ::devicestruc.
                     if(!parsed["vertex_cnt"].is_null())	{ vertex_cnt = parsed["vertex_cnt"].long_value(); }
                     if(!parsed["triangle_cnt"].is_null())	{ triangle_cnt = parsed["triangle_cnt"].long_value(); }
                     if(!parsed["face_cnt"].is_null())	{ face_cnt = parsed["face_cnt"].long_value(); }
+                    if(!parsed["struc_cnt"].is_null())	{ struc_cnt = parsed["struc_cnt"].long_value(); }
 //                    if(!parsed["normal_cnt"].is_null())	{ normal_cnt = parsed["normal_cnt"].long_value(); }
                     for(size_t i = 0; i < vertices.size(); ++i)	{
                         if(!parsed["vertices"][i].is_null())	{ vertices[i].from_json(parsed["vertices"][i].dump()); }
@@ -5100,6 +5133,9 @@ union as a ::devicestruc.
                     }
                     for(size_t i = 0; i < faces.size(); ++i)	{
                         if(!parsed["faces"][i].is_null())	{ faces[i].from_json(parsed["faces"][i].dump()); }
+                    }
+                    for(size_t i = 0; i < strucs.size(); ++i)	{
+                        if(!parsed["strucs"][i].is_null())	{ strucs[i].from_json(parsed["strucs"][i].dump()); }
                     }
 //                    for(size_t i = 0; i < normals.size(); ++i)	{
 //                        if(!parsed["normals"][i].is_null())	{ normals[i].from_json(parsed["normals"][i].dump()); }
@@ -5139,6 +5175,43 @@ union as a ::devicestruc.
 
             string name;
             map<string, NODE_ID_TYPE> node_ids = {{"unknown", NODEIDUNKNOWN}, {"origin", NODEIDORIG}, {"destination", NODEIDDEST}};
+
+            /// Convert class contents to JSON object
+            /** Returns a json11 JSON object of the class
+        \return	A json11 JSON object containing every member variable within the class
+    */
+            json11::Json to_json() const {
+                json11::Json::object ids;
+                for (auto &entry : node_ids) {
+                    ids[entry.first] = static_cast<int>(entry.second);
+                }
+                return json11::Json::object {
+                    { "name" , name },
+                    { "node_ids" , ids }
+                };
+            }
+
+            /// Set class contents from JSON string
+            /** Parses the provided JSON-formatted string and sets the class data. String should be formatted like the string returned from #to_json()
+        \param	s	JSON-formatted string to set class contents to
+        \return n/a
+    */
+            void from_json(const string& s) {
+                string error;
+                json11::Json p = json11::Json::parse(s,error);
+                if(error.empty()) {
+                    if(!p["name"].is_null())	{ name = p["name"].string_value(); }
+                    if(!p["node_ids"].is_null()) {
+                        node_ids.clear();
+                        for (auto &entry : p["node_ids"].object_items()) {
+                            node_ids[entry.first] = static_cast<NODE_ID_TYPE>(entry.second.long_value());
+                        }
+                    }
+                } else {
+                    cerr<<"ERROR: <"<<error<<">"<<endl;
+                }
+                return;
+            }
         };
 
         //! \brief Node Structure
@@ -7462,9 +7535,13 @@ union as a ::devicestruc.
                     { "node" , node },
                     { "pieces" , pieces },
                     { "obj" , obj },
-//                    { "device" , device },
+                    // device (vector<devicestruc*>) is intentionally excluded: every
+                    // entry is a raw pointer into one of devspec's typed sub-vectors
+                    // (see json_adddevice(), jsonlib.cpp), so it is redundant with
+                    // devspec and would double-store/dangle on reload.
                     { "devspec" , devspec },
                     { "port" , port },
+                    { "alias" , alias },
                     { "agent" , agent0 },
                     { "event" , event },
                     { "target" , target },
@@ -7488,6 +7565,11 @@ union as a ::devicestruc.
             /** Parses the provided JSON-formatted string and sets the class data. String should be formatted like the string returned from #to_json()
         \param	s	JSON-formatted string to set class contents to
         \return n/a
+        \note device is not restored here (it is never serialized by to_json() —
+        see the comment there). After calling this, if devspec was loaded, callers
+        must call json_updatecosmosstruc(cinfo) (jsonlib.cpp) to rebuild device's
+        pointers into devspec's sub-vectors; this can't be done here because
+        jsondef.h cannot include jsonlib.h (circular dependency).
     */
             void from_json(const string& s) {
                 string error;
@@ -7519,17 +7601,18 @@ union as a ::devicestruc.
                     }
                     if (!p["node"].is_null()) { node.from_json(p["node"].dump()); }
                     if (!p["obj"].is_null()) { cosmosstruc::obj.from_json(p["obj"].dump()); }
-                    for (size_t i = 0; i < device.size(); ++i) {
-                        if (!p["device"][i].is_null()) { device[i]->from_json(p["device"][i].dump()); }
-                    }
                     if (!p["devspec"].is_null()) { devspec.from_json(p["devspec"].dump()); }
                     for (size_t i = 0; i < port.size(); ++i) {
                         if (!p["port"][i].is_null()) { port[i].from_json(p["port"][i].dump()); }
                     }
+                    for (size_t i = 0; i < p["alias"].array_items().size(); ++i) {
+                        if (i >= alias.size()) { alias.emplace_back(); }
+                        if (!p["alias"][i].is_null()) { alias[i].from_json(p["alias"][i].dump()); }
+                    }
 //                    for (size_t i = 0; i < agent.size(); ++i) {
 //                        if (!p["agent"][i].is_null()) { agent[i].from_json(p["agent"][i].dump()); }
 //                    }
-                    if (!p["agent0"][i].is_null()) { agent0.from_json(p["agent0"].dump()); }
+                    if (!p["agent0"].is_null()) { agent0.from_json(p["agent0"].dump()); }
                     for (size_t i = 0; i < event.size(); ++i) {
                         if (!p["event"][i].is_null()) { event[i].from_json(p["event"][i].dump()); }
                     }

@@ -131,7 +131,7 @@ int main(int argc, char *argv[])
                     trackstruc ttrack;
                     ttrack.name = nodes[i];
                     cosmosstruc *cinfo = json_init(ttrack.name);
-                    iretn = json_setup_node(ttrack.name, cinfo);
+                    iretn = json_setup_node(ttrack.name, cinfo->realm.name, cinfo);
                     if (iretn == 0)
                     {
                         if (iretn == 0 && (currentmjd()-cinfo->node.loc.pos.eci.utc) < 10.)

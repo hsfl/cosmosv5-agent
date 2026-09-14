@@ -13,7 +13,14 @@ namespace Beacon {
 void BeaconUTest::SetUp()
 {
     // Clear previously created test directory, if any
-    rmdir(get_cosmosnodes() + TEST_NODE_NAME);
+    {
+        string realmdir = get_realmdir(TEST_REALM_NAME);
+        if (!realmdir.empty())
+        {
+            remove((realmdir + "/nodes/" + TEST_NODE_NAME + ".json").c_str());
+            rmdir(realmdir + "/nodes/" + TEST_NODE_NAME);
+        }
+    }
     srand(decisec());
     agent = new Agent(0);
     // Initialize COSMOS data space
@@ -50,8 +57,8 @@ void BeaconUTest::SetUp()
         iretn = json_createpiece(agent->cinfo, "gyro"+std::to_string(i), DeviceType::GYRO);
         ASSERT_GE(iretn, 0);
     }
-    // Dump ini files, then reload agent
-    json_dump_node(agent->cinfo);
+    // Dump node payload, then reload agent
+    json_dump_node(agent->cinfo, TEST_REALM_NAME);
     delete agent->cinfo;
     agent->cinfo = nullptr;
     delete agent;
@@ -60,21 +67,28 @@ void BeaconUTest::SetUp()
     agent->cinfo = json_init(TEST_NODE_NAME);
     ASSERT_NE(agent->cinfo, nullptr);
 //    agent->cinfo->node.name = TEST_NODE_NAME;
-    iretn = json_setup_node(agent->cinfo->node.name, agent->cinfo);
+    iretn = json_setup_node(agent->cinfo->node.name, TEST_REALM_NAME, agent->cinfo);
     ASSERT_EQ(iretn, 0);
     // Receiving agent
     agent2 = new Agent(0);
     agent2->cinfo = json_init(TEST_NODE_NAME);
     ASSERT_NE(agent2->cinfo, nullptr);
 //    agent2->cinfo->node.name = TEST_NODE_NAME;
-    iretn = json_setup_node(agent2->cinfo->node.name, agent2->cinfo);
+    iretn = json_setup_node(agent2->cinfo->node.name, TEST_REALM_NAME, agent2->cinfo);
     ASSERT_EQ(iretn, 0);
 }
 
 // Cleanup for text fixture class
 void BeaconUTest::TearDown()
 {
-    rmdir(get_cosmosnodes() + TEST_NODE_NAME);
+    {
+        string realmdir = get_realmdir(TEST_REALM_NAME);
+        if (!realmdir.empty())
+        {
+            remove((realmdir + "/nodes/" + TEST_NODE_NAME + ".json").c_str());
+            rmdir(realmdir + "/nodes/" + TEST_NODE_NAME);
+        }
+    }
     delete agent->cinfo;
     agent->cinfo = nullptr;
     delete agent;

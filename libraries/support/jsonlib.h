@@ -136,7 +136,7 @@ void json_init_node(cosmosstruc* cinfo);
 void json_init_reserve(cosmosstruc* cinfo);
 cosmosstruc *json_init(cosmosstruc *cinfo, string node="");
 cosmosstruc *json_init(string node="");
-int32_t json_create_node(cosmosstruc *cinfo, string &node_name, uint16_t node_type=NODE_TYPE_COMPUTER);
+int32_t json_create_node(cosmosstruc *cinfo, string &node_name, const string &realm, uint16_t node_type=NODE_TYPE_COMPUTER);
 int32_t json_shrink(cosmosstruc *cinfo);
 //int32_t json_clone(cosmosstruc *cinfo1, cosmosstruc *cinfo2);
 int32_t json_repoint(cosmosstruc *cinfo);
@@ -307,13 +307,11 @@ int32_t json_skip_to_next_member(const char* &ptr);
 int32_t json_skip_white(const char* &ptr);
 int32_t json_clear_cosmosstruc(int32_t type, cosmosstruc *cinfo);
 int32_t json_map_node(cosmosstruc *cinfo);
-int32_t json_setup_node(jsonnode json, cosmosstruc *cinfo, bool create_flag = false);
-int32_t json_setup_node(string &node, cosmosstruc *cinfo);
+int32_t json_setup_node(string &node, const string &realm, cosmosstruc *cinfo);
 int32_t json_setup_realm(string &realm, cosmosstruc *cinfo);
-int32_t json_load_node(string node, jsonnode &json);
 int32_t json_clone_node(cosmosstruc *source, cosmosstruc *destination);
 int32_t load_tle(cosmosstruc *cinfo);
-int32_t json_dump_node(cosmosstruc *cinfo);
+int32_t json_dump_node(cosmosstruc *cinfo, const string &realm);
 int32_t json_recenter_node(cosmosstruc *cinfo);
 
 const char *json_of_wildcard(string &jstring, string wildcard, cosmosstruc *cinfo);
@@ -343,14 +341,31 @@ const char *json_of_event(string &jstring, cosmosstruc *cinfo);
 const char *json_of_log(string &jstring, cosmosstruc *cinfo);
 //char* json_of_command(string &jstring, string node, string name, string user, string type, double utc);
 const char *json_node(string &jstring, cosmosstruc *cinfo);
-const char *json_vertices(string &jstring, cosmosstruc *cinfo);
-const char *json_triangles(string &jstring, cosmosstruc *cinfo);
-const char *json_faces(string &jstring, cosmosstruc *cinfo);
-const char *json_strucs(string &jstring, cosmosstruc *cinfo);
 const char *json_pieces(string &jstring, cosmosstruc *cinfo);
 const char *json_devices_general(string &jstring, cosmosstruc *cinfo);
 const char *json_devices_specific(string &jstring, cosmosstruc *cinfo);
-const char *json_ports(string &jstring, cosmosstruc *cinfo);
+
+//! \ingroup jsonlib
+//! \defgroup jsonlib_shortcuts JSON "shortcut" payloads
+//! A shortcut is a named, curated JSON payload carrying only the fields one
+//! specific message ("jtype") needs, as opposed to a struct's own full
+//! to_json()/from_json() (canonical, round-trip, used for on-disk storage).
+//! A shortcut may pull from a single struct or assemble fields from several.
+//! Convention: json_<name>_payload(...) builds the payload (already including
+//! its own {"jtype":"<name>"} field), json_<name>_payload_load(...) parses it
+//! back. Every caller building/parsing a given jtype should go through this
+//! pair rather than inlining its own json11::Json::object{...} literal, so
+//! the shape stays consistent wherever it's produced or consumed.
+json11::Json json_event_payload(const string &node, const eventstruc &event);
+int32_t json_event_payload_load(string &node, eventstruc &event, const string &s);
+json11::Json json_soh_payload(const cosmosstruc *cinfo);
+int32_t json_soh_payload_load(cosmosstruc *cinfo, const string &s);
+//! Node "shortcut": the curated subset (node/pieces/obj/devspec/port/alias)
+//! written to <realm>/nodes/<node>.json and used for jtype:"node" wire
+//! messages alike — NOT a full cosmosstruc::to_json() dump (which would
+//! wrongly pull in realm-wide/runtime fields like target/event/sim_states).
+json11::Json json_node_payload(const cosmosstruc *cinfo);
+int32_t json_node_payload_load(cosmosstruc *cinfo, const string &s);
 
 void json_test(cosmosstruc *cinfo);
 

@@ -34,6 +34,7 @@ protected:
     size_t num_gyros = 1;
 
     const string TEST_NODE_NAME = "beacon_ut_test_node";
+    const string TEST_REALM_NAME = "beacon_ut_test_realm";
 
     
 }; // End class BeaconUTest

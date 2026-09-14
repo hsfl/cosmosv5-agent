@@ -484,17 +484,7 @@ int main(int argc, char *argv[])
                     }
                     if (postevent)
                     {
-                        json11::Json jobj = json11::Json::object({
-                            {"mtype", "event"},
-                            {"node_name", results[elapsed][i].node.name},
-                            {"event_utc", event.utc},
-                            {"event_name", event.name},
-                            {"event_type", static_cast<int>(event.type)},
-                            {"event_flag", static_cast<int>(event.flag)},
-                            {"event_el", event.el},
-                            {"event_az", event.az},
-                            {"geodpos", results[elapsed][i].node.loc.pos.geod.s}
-                        });
+                        json11::Json jobj = json_event_payload(results[elapsed][i].node.name, event);
                         string output = jobj.dump();
                         iretn = socket_post(data_channel_out, output.c_str());
 
@@ -895,7 +885,7 @@ int32_t request_dump_node(string &request, string &response, Agent *agent)
         Physics::Simulator::StateList::iterator sit = sim->GetNode(args[1]);
         if (sit != sim->cnodes.end())
         {
-            json_dump_node(&(*sit)->currentinfo);
+            json_dump_node(&(*sit)->currentinfo, realmname);
             response = args[1];
         }
     }
