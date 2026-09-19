@@ -7790,6 +7790,207 @@ int32_t json_setup_node(string &node, const string &realm, cosmosstruc *cinfo)
     return 0;
 }
 
+//! Build the runtime target for a ground station node: same name, type and
+//! location, so contact math treats it like any other target. Ground stations
+//! are fixed geodetic points, so this only needs doing once at load time.
+//! \param node A node whose type is NODE_TYPE_GROUNDSTATION.
+targetstruc target_from_node(const nodestruc &node)
+{
+    targetstruc target;
+    target.name = node.name;
+    target.type = node.type;
+    target.loc = node.loc;
+    if (target.loc.pos.geod.utc == 0.)
+    {
+        target.loc.pos.geod.utc = currentmjd();
+    }
+    Convert::pos_set_geod(target.loc);
+    target.loc.pos.extra.closest = COSMOS_EARTH;
+    target.area = 0.;
+    target.size = gvector(0., 0., 0.);
+    return target;
+}
+
+//! Collect the realm's ground station nodes from <realm>/nodes/*.json.
+//! Only the payload's "node" member is read (see json_node_payload()); nodes of
+//! any other type, including NODE_TYPE_MOC, are skipped.
+//! \param stations Ground station nodes are appended.
+//! \return Number appended, or negative error. A realm with no nodes directory has none.
+int32_t json_load_realm_groundstations(const string &realm, vector<nodestruc> &stations)
+{
+    string nodesdir = get_realmdir(realm) + "/nodes";
+    DIR *dp = opendir(nodesdir.c_str());
+    if (dp == nullptr)
+    {
+        return 0;
+    }
+
+    int32_t count = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dp)) != nullptr)
+    {
+        string fname = entry->d_name;
+        if (fname.size() <= 5 || fname.compare(fname.size()-5, 5, ".json") != 0)
+        {
+            continue;
+        }
+
+        ifstream ifs(nodesdir + "/" + fname);
+        if (!ifs.is_open())
+        {
+            continue;
+        }
+        string buf((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+        string error;
+        json11::Json payload = json11::Json::parse(buf, error);
+        if (!error.empty() || payload["node"].is_null())
+        {
+            continue;
+        }
+
+        nodestruc node;
+        node.from_json(payload["node"].dump());
+        if (node.type == NODE_TYPE_GROUNDSTATION)
+        {
+            stations.push_back(node);
+            ++count;
+        }
+    }
+    closedir(dp);
+    return count;
+}
+
+//! Serialize one target to its compact "shortcut" form — see json_target_payload()
+//! in jsonlib.h for the shape.
+json11::Json json_target_payload(const targetstruc &target)
+{
+    bool moon = (target.loc.pos.extra.closest == COSMOS_MOON);
+    const gvector &s = moon ? target.loc.pos.selg.s : target.loc.pos.geod.s;
+    json11::Json::object payload = {
+        { "name", target.name },
+        { "type", static_cast<double>(target.type) },
+        { "body", moon ? "moon" : "earth" },
+        { "lat", DEGOF(s.lat) },
+        { "lon", DEGOF(s.lon) },
+        { "h", s.h },
+        { "area", static_cast<double>(target.area) },
+    };
+    if (target.min != 0.f) { payload["minel"] = DEGOF(target.min); }
+    return payload;
+}
+
+//! Build a ::targetstruc from its compact "shortcut" form.
+//! \param target Filled in place (fields absent from the payload keep their values).
+//! \param payload Parsed JSON object; "lat" and "lon" are required.
+//! \return Zero if successful, negative error otherwise.
+int32_t json_target_payload_load(targetstruc &target, const json11::Json &payload)
+{
+    if (!payload.is_object() || payload["lat"].is_null() || payload["lon"].is_null())
+    {
+        return COSMOS_JSON_ERROR_JSTRING;
+    }
+
+    if (!payload["name"].is_null()) { target.name = payload["name"].string_value(); }
+    target.type = payload["type"].is_null() ? 0 : payload["type"].long_value();
+
+    bool moon = (payload["body"].string_value() == "moon");
+    double lat = RADOF(payload["lat"].number_value());
+    double lon = RADOF(payload["lon"].number_value());
+    double h = payload["h"].number_value();
+
+    target.loc = Convert::locstruc();
+    double utc = currentmjd();
+    if (moon)
+    {
+        target.loc.pos.selg.utc = utc;
+        target.loc.pos.selg.s = { lat, lon, h };
+        target.loc.pos.selg.v = gv_zero();
+        target.loc.pos.selg.a = gv_zero();
+        Convert::pos_set_selg(target.loc);
+        target.loc.pos.extra.closest = COSMOS_MOON;
+    }
+    else
+    {
+        target.loc.pos.geod.utc = utc;
+        target.loc.pos.geod.s = { lat, lon, h };
+        target.loc.pos.geod.v = gv_zero();
+        target.loc.pos.geod.a = gv_zero();
+        Convert::pos_set_geod(target.loc);
+        target.loc.pos.extra.closest = COSMOS_EARTH;
+    }
+
+    // Angular extent needs the radius of the body the target actually sits on
+    double bodyRadius = moon ? RMOONM : REARTHM;
+    double radius;
+    if (!payload["radius"].is_null())
+    {
+        radius = payload["radius"].number_value();
+        target.area = M_PI * radius * radius;
+    }
+    else
+    {
+        target.area = payload["area"].is_null() ? 1. : payload["area"].number_value();
+        radius = sqrt(target.area / M_PI);
+    }
+    target.size = gvector(radius / bodyRadius, radius / bodyRadius, 0.);
+
+    if (!payload["minel"].is_null()) { target.min = RADOF(payload["minel"].number_value()); }
+    return 0;
+}
+
+//! Load a targets file (normally <realm>/targets.json): a JSON array of
+//! target shortcuts.
+//! \param fname Full path of the file.
+//! \return Number of targets appended to \p targets, COSMOS_GENERAL_ERROR_OPEN
+//! if the file is missing, or a negative error if it can't be parsed.
+int32_t json_targets_load(const string &fname, vector<targetstruc> &targets)
+{
+    struct stat fstat;
+    if (stat(fname.c_str(), &fstat) != 0)
+    {
+        return COSMOS_GENERAL_ERROR_OPEN;
+    }
+    if (fstat.st_size == 0)
+    {
+        return 0;
+    }
+
+    ifstream ifs(fname);
+    if (!ifs.is_open())
+    {
+        return COSMOS_GENERAL_ERROR_OPEN;
+    }
+    string buf(fstat.st_size, '\0');
+    ifs.read(&buf[0], fstat.st_size);
+    ifs.close();
+
+    string error;
+    json11::Json arr = json11::Json::parse(buf, error);
+    if (!error.empty() || !arr.is_array())
+    {
+        std::cerr << "Error parsing " << fname << ": " << error << std::endl;
+        return COSMOS_JSON_ERROR_JSTRING;
+    }
+
+    int32_t count = 0;
+    for (auto &item : arr.array_items())
+    {
+        targetstruc targ;
+        if (json_target_payload_load(targ, item) < 0)
+        {
+            std::cerr << "Skipping malformed target in " << fname << ": " << item.dump() << std::endl;
+            continue;
+        }
+        if (targ.name.empty())
+        {
+            targ.name = "target_" + to_unsigned(targets.size(), 3, true);
+        }
+        targets.push_back(targ);
+        ++count;
+    }
+    return count;
+}
+
 //! Setup Realm-level information: <realm>/realm.json (name + node_ids) and
 //! <realm>/targets.json (a JSON array of permanent physical targets — never
 //! NODE_TYPE_GROUNDSTATION, see Simulator::AddGroundStations()). Either file
@@ -7821,32 +8022,8 @@ int32_t json_setup_realm(string &realm, cosmosstruc *cinfo)
     }
     if (cinfo->realm.name.empty()) { cinfo->realm.name = realm; }
 
-    string targetsfname = realmdir + "/targets.json";
-    if (stat(targetsfname.c_str(), &fstat) == 0 && fstat.st_size > 0)
-    {
-        ifstream ifs(targetsfname);
-        if (ifs.is_open())
-        {
-            string buf(fstat.st_size, '\0');
-            ifs.read(&buf[0], fstat.st_size);
-            ifs.close();
-            string error;
-            json11::Json arr = json11::Json::parse(buf, error);
-            if (error.empty())
-            {
-                for (auto &item : arr.array_items())
-                {
-                    targetstruc targ;
-                    targ.from_json(item.dump());
-                    cinfo->target.push_back(targ);
-                }
-            }
-            else
-            {
-                std::cerr << "Error parsing JSON: " << error << std::endl;
-            }
-        }
-    }
+    // Missing targets.json (e.g. a brand-new realm) is not an error
+    json_targets_load(realmdir + "/targets.json", cinfo->target);
 
     return cinfo->target.size();
 }
@@ -13138,40 +13315,21 @@ string lookup_node_id_name(cosmosstruc *cinfo, NODE_ID_TYPE node_id)
 
 int32_t load_target(cosmosstruc *cinfo)
 {
-    string fname = get_realmdir(cinfo->realm.name) + "/targets.json";
-    struct stat fstat;
-    if (stat(fname.c_str(), &fstat) != 0 || fstat.st_size == 0)
+    vector<targetstruc> targets;
+    int32_t iretn = json_targets_load(get_realmdir(cinfo->realm.name) + "/targets.json", targets);
+    if (iretn == COSMOS_GENERAL_ERROR_OPEN)
     {
         return 0;
     }
-
-    ifstream ifs(fname);
-    if (!ifs.is_open())
+    if (iretn < 0)
     {
-        return 0;
-    }
-    string buf(fstat.st_size, '\0');
-    ifs.read(&buf[0], fstat.st_size);
-    ifs.close();
-
-    string error;
-    json11::Json arr = json11::Json::parse(buf, error);
-    if (!error.empty())
-    {
-        std::cerr << "Error parsing JSON: " << error << std::endl;
-        return COSMOS_JSON_ERROR_JSTRING;
+        return iretn;
     }
 
     cinfo->target.clear();
-    for (auto &item : arr.array_items())
+    for (targetstruc &targ : targets)
     {
-        targetstruc targ;
-        targ.from_json(item.dump());
-        if (targ.loc.utc == 0.)
-        {
-            targ.loc.utc = currentmjd(cinfo->node.utcoffset);
-        }
-        // This may cause problems, but location information won't be complete without it
+        // Location information won't be complete without a full update
         loc_update(&targ.loc);
         cinfo->target.push_back(targ);
     }

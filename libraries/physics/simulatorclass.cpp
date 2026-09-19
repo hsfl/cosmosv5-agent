@@ -1195,218 +1195,83 @@ int32_t Simulator::ParseSatString(string args)
     return argcount;
 }
 
-//! \brief Add targets from lines of JSON in a file.
-//! \param filename Path to file containing target information.
+//! \brief Add targets from a targets file: a JSON array of target shortcuts
+//! (see json_target_payload()), normally <realm>/targets.json.
+//! \param filename Path to the file, or a name relative to the realm directory.
+//! Empty means <realm>/targets.json.
 //! \return Number of targets, or negative error.
 
 int32_t Simulator::ParseTargetFile(string filename)
 {
-    FILE *fp = nullptr;
+    string realmdir = get_realmdir(realmname, true);
     if (filename.empty())
     {
-        filename = get_realmdir(realmname, true) + "/" + "targets.dat";
-        fp = fopen(filename.c_str(), "r");
-        if (fp == nullptr)
-        {
-            return -1;
-        }
+        filename = realmdir + "/targets.json";
     }
-    else
+    else if (access(filename.c_str(), R_OK) != 0)
     {
-        fp = fopen(filename.c_str(), "r");
-        if (fp == nullptr)
-        {
-            filename = get_realmdir(realmname, true) + "/" + filename;
-            fp = fopen(filename.c_str(), "r");
-            if (fp == nullptr)
-            {
-                return -1;
-            }
-        }
+        filename = realmdir + "/" + filename;
     }
 
-    if (fp == nullptr)
+    vector<targetstruc> loaded;
+    int32_t iretn = json_targets_load(filename, loaded);
+    if (iretn < 0)
     {
-        return -1;
+        return iretn;
     }
-
-    string line;
-    int32_t iretn;
-    line.resize(510);
-    while (fgets((char *)line.data(), 500, fp) != nullptr)
+    for (targetstruc &targ : loaded)
     {
-        if (line.front() == '#') { continue; }
-        iretn = ParseTargetString(line);
-        if (iretn < 0)
-        {
-            fclose(fp);
-            return iretn;
-        }
+        AddTarget(targ);
     }
-    fclose(fp);
     return targets.size();
 }
 
-int32_t Simulator::ParseTargetJson(json11::Json jargs)	{
+//! \brief Add targets from a JSON object keyed by target name, each value a
+//! target shortcut (see json_target_payload()). The key supplies the name.
+//! \param jargs Parsed JSON object.
+//! \return Zero, or negative error if any entry is malformed.
 
-    // Iterate over the JSON object
-    for (const auto& item : jargs.object_items()) {
+int32_t Simulator::ParseTargetJson(json11::Json jargs)
+{
+    int32_t iretn = 0;
+    for (const auto& item : jargs.object_items())
+    {
         targetstruc targ;
-        json11::Json data = item.second;
-
-        // Extract Name
-        targ.name=item.first;
-
-        // Extract Type
-        targ.type = 0;
-        if (!data["type"].is_null()) { targ.type = data["type"].number_value(); }
-
-        // Extract GEOD
-        targ.loc.pos.geod.s.lat = 0.0;
-        if (!data["latitude"].is_null()) { targ.loc.pos.geod.s.lat = RADOF(data["latitude"].number_value()); }
-
-        targ.loc.pos.geod.s.lon = 0.0;
-        if (!data["longitude"].is_null()) { targ.loc.pos.geod.s.lon = RADOF(data["longitude"].number_value()); }
-
-        targ.loc.pos.geod.s.h = 0.;
-        if (!data["altitude"].is_null()) { targ.loc.pos.geod.s.h = data["altitude"].number_value(); }
-
-        targ.area = 10000.;
-        if (!data["area"].is_null()) { targ.area = data["area"].number_value(); }
-        if (!data["radius"].is_null())
+        targ.name = item.first;
+        int32_t itemret = json_target_payload_load(targ, item.second);
+        if (itemret < 0)
         {
-            float radius = data["radius"].number_value();
-            targ.area = M_PI * radius * radius;
+            iretn = itemret;
+            continue;
         }
-
         AddTarget(targ);
     }
-    return 0;
+    return iretn;
 }
 
+//! \brief Add every ground station node in the realm as a target.
+//!
+//! Ground stations are real nodes (NODE_TYPE_GROUNDSTATION files under
+//! <realm>/nodes/), not rows in targets.json. Each is synthesized into a
+//! target so contact/pointing math treats it like any other. MOCs are logical
+//! nodes and are never added. Ground stations are fixed points, so this runs
+//! once, after the propagated nodes exist.
+//! \return Number of ground stations added, or negative error.
 
-//! \brief Add single target from line of JSON in a string.
-//! \param args JSON line of target arguments.
-//! \return Number of arguments, or negative error.
-
-/* given a JSON string of targets formatted this way:
-
+int32_t Simulator::AddGroundStations()
 {
-"target_name_1":{"lat":19.398552,"lon":-155.284714,"h":190.1,"size":230},
-"target_name_2":{"lat":19.400633,"lon":-155.271988,"h":213.2,"size":57},
-"target_name_3":{"lat":19.417826,"lon":-155.073257,"h":-10.3,"size":176},
-"target_name_4":{"lat":19.419832,"lon":-155.061142,"h":142.4,"size":438},
-...
-
-each target is loaded into cosmosstruc::target (via AddTarget(..))
-
-notes:
-
-longitude and latitude are in radians
-height is in meters
-missing fields receive a value of "" or 0
-
-*/
-int32_t Simulator::ParseTargetString(string line)
-{
-    // if valid JSON string, parse JSON object and populate cosmosstruc::target
-    // else not valid JSON string, use legacy target format
-
-    if (line[0] == '{')
+    vector<nodestruc> stations;
+    int32_t iretn = json_load_realm_groundstations(realmname, stations);
+    if (iretn < 0)
     {
-        targetstruc targ;
-        string estring;
-        json11::Json data = json11::Json::parse(line, estring);
-
-        // Check for any parsing errors
-        if (!estring.empty()) {
-            std::cerr << "Error parsing JSON: " << estring << std::endl;
-            return -1;
-        }
-
-        if (!data["name"].is_null())
-        {
-            targ.name = data["name"].string_value();
-        }
-        if (targ.name.empty())
-        {
-            targ.name = "target_" + to_unsigned(targets.size(), 3, true);
-        }
-
-        // Extract Type
-        targ.type = 0;
-        if (!data["type"].is_null())
-        {
-            targ.type = data["type"].number_value();
-        }
-
-        // Extract GEOD
-        targ.loc.pos.geod.s.lat = 0.0;
-        if (!data["latitude"].is_null())
-        {
-            targ.loc.pos.geod.s.lat = RADOF(data["latitude"].number_value());
-        }
-
-        if (!data["rlatitude"].is_null())
-        {
-            targ.loc.pos.geod.s.lat = (data["rlatitude"].number_value());
-        }
-
-        targ.loc.pos.geod.s.lon = 0.0;
-        if (!data["longitude"].is_null())
-        {
-            targ.loc.pos.geod.s.lon = RADOF(data["longitude"].number_value());
-        }
-
-        if (!data["rlongitude"].is_null())
-        {
-            targ.loc.pos.geod.s.lon = (data["rlongitude"].number_value());
-        }
-
-        targ.loc.pos.geod.s.h = 0.;
-        if (!data["altitude"].is_null())
-        {
-            targ.loc.pos.geod.s.h = data["altitude"].number_value();
-        }
-
-        targ.area = 1.;
-        if (!data["area"].is_null())
-        {
-            targ.area = data["area"].number_value();
-            targ.size = gvector(sqrt(targ.area/M_PI), sqrt(targ.area/M_PI), 0.);
-        }
-
-        if (!data["radius"].is_null())
-        {
-            targ.area = data["radius"].number_value();
-            targ.size = gvector(targ.area/REARTHM, targ.area/REARTHM, 0.);
-            targ.area *= M_PI * targ.area;
-        }
-
-        if (!data["minelfrom"].is_null())
-        {
-            targ.area = data["minelto"].number_value();
-        }
-
+        return iretn;
+    }
+    for (nodestruc &station : stations)
+    {
+        targetstruc targ = target_from_node(station);
         AddTarget(targ);
     }
-    else
-    {
-        vector<string> args = string_split(line, " \t", true);
-        if (args.size() == 4)
-        {
-            AddTarget(args[0], RADOF(stod(args[1])), RADOF(stod(args[2])), 0., stod(args[3]), NODE_TYPE_GROUNDSTATION);
-        }
-        else if (args.size() == 5)
-        {
-            AddTarget(args[0], RADOF(stod(args[1])), RADOF(stod(args[2])), stod(args[3]), stod(args[4]), NODE_TYPE_TARGET);
-        }
-        else if (args.size() == 6)
-        {
-            AddTarget(args[0], RADOF(stod(args[1])), RADOF(stod(args[2])), RADOF(stod(args[3])), RADOF(stod(args[4])), stod(args[5]), NODE_TYPE_TARGET);
-        }
-    }
-    return targets.size();
+    return stations.size();
 }
 
 //! \brief Nudges Node in the desired direction

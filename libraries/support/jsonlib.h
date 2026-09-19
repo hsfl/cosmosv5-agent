@@ -367,6 +367,29 @@ int32_t json_soh_payload_load(cosmosstruc *cinfo, const string &s);
 json11::Json json_node_payload(const cosmosstruc *cinfo);
 int32_t json_node_payload_load(cosmosstruc *cinfo, const string &s);
 
+//! Target "shortcut": compact, hand-authorable form of one permanent physical
+//! target (an Earth or Moon surface point/area), and the element type of
+//! <realm>/targets.json. Angles are degrees, h is metres:
+//!   {"name":"Faustini","type":5,"body":"moon","lat":-87.2,"lon":85.0,"h":0,
+//!    "radius":2100,"minel":10}
+//! "body" is "earth" (default) or "moon" and selects the surface frame
+//! (geod vs selg) and the radius used to convert size to angular extent.
+//! Give "radius" (m, wins) or "area" (m^2); "minel" (deg) is the minimum
+//! elevation. Distinct from targetstruc::to_json(), which is the canonical
+//! full dump (radians, complete locstruc). Never NODE_TYPE_GROUNDSTATION or
+//! NODE_TYPE_MOC — those are nodes, see Simulator::AddGroundStations().
+json11::Json json_target_payload(const targetstruc &target);
+int32_t json_target_payload_load(targetstruc &target, const json11::Json &payload);
+int32_t json_targets_load(const string &fname, vector<targetstruc> &targets);
+
+//! Ground stations are real nodes (NODE_TYPE_GROUNDSTATION files under
+//! <realm>/nodes/), not target rows. These two turn them into the runtime
+//! cinfo->target entries used for az/el/range: json_load_realm_groundstations()
+//! collects the realm's ground station nodes (never NODE_TYPE_MOC — MOCs are
+//! logical nodes), and target_from_node() synthesizes one target from one.
+targetstruc target_from_node(const nodestruc &node);
+int32_t json_load_realm_groundstations(const string &realm, vector<nodestruc> &stations);
+
 void json_test(cosmosstruc *cinfo);
 
 uint16_t json_hash(string hstring);

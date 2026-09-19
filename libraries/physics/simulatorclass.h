@@ -74,8 +74,8 @@ namespace Cosmos
             int32_t ParseSatFile(string filename="");
             int32_t ParseSatString(string args);
             int32_t ParseTargetFile(string filename="");
-            int32_t ParseTargetString(string line);
             int32_t ParseTargetJson(json11::Json jargs);
+            int32_t AddGroundStations();
             int32_t GetError();
             int32_t Propagate(double nextutc=0., bool enablethrust=false, bool enabletorque=false);
             int32_t Propagate(vector<vector<cosmosstruc> > &results, uint32_t runcount);

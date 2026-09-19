@@ -184,13 +184,16 @@ int main(int argc, char *argv[])
         satfile = satfile.substr(satfile.find_last_of('/'));
     }
     lvlhoffset.resize(sim->cnodes.size());
+    // Permanent targets come from <realm>/targets.json; ground stations are
+    // nodes in the realm and are synthesized into targets here.
     int32_t targetret = sim->ParseTargetFile(targetfile);
+    int32_t gsret = sim->AddGroundStations();
     if (batch)
     {
         // Batch mode refuses to run on an empty scenario
         if (orbitret < 0)  { cout << "unable to parse orbitfile = <" << orbitfile << ">" << endl; exit(orbitret); }
         if (satret <= 0)   { cout << "unable to parse satfile = <" << satfile << ">" << endl; exit(-1); }
-        if (targetret <= 0){ cout << "unable to parse targetfile = <" << targetfile << ">" << endl; exit(-1); }
+        if (targetret <= 0 && gsret <= 0) { cout << "no targets or ground stations found in realm <" << realmname << ">" << endl; exit(-1); }
         return run_batch();
     }
     if (realtime)
