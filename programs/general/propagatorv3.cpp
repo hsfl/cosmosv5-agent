@@ -4,9 +4,11 @@
 #include "support/jsonclass.h"
 #include "device/cpu/devicecpu.h"
 #include "device/disk/devicedisk.h"
+#include <functional>
 
 
 int32_t parse_control(string args);
+int32_t run_batch();
 int32_t request_get_sat_json(string &request, string &response, Agent *agent);
 int32_t request_get_node_json(string &request, string &response, Agent *agent);
 int32_t request_get_pieces_json(string &request, string &response, Agent *agent);
@@ -27,7 +29,11 @@ uint16_t settle=0;
 uint16_t printevent=0;
 uint16_t jsonevent=0;
 uint16_t postevent=0;
+uint16_t batch=0;
+string outdir="";
+vector<vector<cosmosstruc>> results;
 double initialutc = 60107.01;
+bool initialutc_given = false;
 double endutc = 0.;
 double deltautc = 0.;
 string formation = "string";
@@ -35,7 +41,7 @@ double spacing = 1000.;
 string realmname = "propagate";
 string orbitfile = "";
 string satfile = "";
-string targetfile = "targets.dat";
+string targetfile = "";
 string tlefile = "tle.dat";
 string dump ="";
 string pointingfile;
@@ -113,9 +119,11 @@ int main(int argc, char *argv[])
         agent->shutdown();
         exit(iretn);
     }
-    sim->Init(simdt, realmname);
-    sim->ParseOrbitFile();
-    sim->ParseSatFile(satfile);
+    // Init's third argument is a base the orbit's own epoch is added to, so an
+    // absolute "now" would double it: only pass it when the user asked for one.
+    sim->Init(simdt, realmname, initialutc_given ? initialutc : 0.);
+    int32_t orbitret = sim->ParseOrbitFile(orbitfile);
+    int32_t satret = sim->ParseSatFile(satfile);
 
     if (!dump.empty())
     {
@@ -176,7 +184,15 @@ int main(int argc, char *argv[])
         satfile = satfile.substr(satfile.find_last_of('/'));
     }
     lvlhoffset.resize(sim->cnodes.size());
-    sim->ParseTargetFile();
+    int32_t targetret = sim->ParseTargetFile(targetfile);
+    if (batch)
+    {
+        // Batch mode refuses to run on an empty scenario
+        if (orbitret < 0)  { cout << "unable to parse orbitfile = <" << orbitfile << ">" << endl; exit(orbitret); }
+        if (satret <= 0)   { cout << "unable to parse satfile = <" << satfile << ">" << endl; exit(-1); }
+        if (targetret <= 0){ cout << "unable to parse targetfile = <" << targetfile << ">" << endl; exit(-1); }
+        return run_batch();
+    }
     if (realtime)
     {
         agent->cinfo->agent0.aprd = simdt;
@@ -1310,6 +1326,146 @@ int main(int argc, char *argv[])
     }
 }
 
+// Write one CSV per node/target of a position series taken from `results`, into outdir.
+// `pick(state, n)` selects the cartesian position (eci or geoc); n is the target
+// index when writing targets (sampled from node 0) and is ignored for nodes.
+static void write_position_files(const string &kind, const string &frame,
+                                 const std::function<const cartpos &(const cosmosstruc &, size_t)> &pick,
+                                 bool targets)
+{
+    if (results.empty() || results[0].empty()) { return; }
+    size_t count = targets ? results[0][0].target.size() : results[0].size();
+    for (size_t n = 0; n < count; ++n)
+    {
+        ofstream out(outdir + "/" + kind + "_" + std::to_string(n) + "." + frame);
+        if (!out.is_open()) { continue; }
+        out << std::fixed << std::setprecision(6);
+        // Start at 1: target position/utc is not set at time 0
+        for (size_t t = 1; t < results.size(); ++t)
+        {
+            const cartpos &pos = pick(results[t][targets ? 0 : n], n);
+            out << pos.s.col[0] << "," << pos.s.col[1] << "," << pos.s.col[2] << "," << pos.utc << endl;
+        }
+    }
+}
+
+// Run the whole scenario in one call: propagate runcount steps, compute
+// targeting and coverage metrics, then report events/state from `results`.
+int32_t run_batch()
+{
+    int32_t iretn;
+    std::cout << std::fixed << std::setprecision(7);
+
+    if (postevent)
+    {
+        iretn = socket_open(data_channel_out, CLIENT_PORT_OUT, 2000000);
+    }
+
+    sim->Propagate(results, static_cast<uint32_t>(runcount));
+    sim->Target(results);
+    sim->Metric(results);
+
+    for (size_t elapsed = 0; elapsed < results.size(); ++elapsed)
+    {
+        for (size_t i = 0; i < results[elapsed].size(); ++i)
+        {
+            cosmosstruc &state = results[elapsed][i];
+            for (eventstruc &event : state.event)
+            {
+                if (printevent)
+                {
+                    string output = "type: event";
+                    output += to_label("\tnode", state.node.name);
+                    output += to_label("\tutc", to_mjd(state.node.utc));
+                    output += to_label("\tname", event.name);
+                    output += to_label("\ttype", to_unsigned(static_cast<int>(event.type)));
+                    output += to_label("\tflag", to_unsigned(static_cast<int>(event.flag)));
+                    output += to_label("\tel", to_floating(event.el, 4));
+                    output += to_label("\taz", to_floating(event.az, 4));
+                    output += to_label("\tdtime", to_floating(86400.*event.dtime, 1));
+                    output += to_label("\tlon", to_floating(state.node.loc.pos.geod.s.lon, 5));
+                    output += to_label("\tlat", to_floating(state.node.loc.pos.geod.s.lat, 5));
+                    output += to_label("\talt", to_floating(state.node.loc.pos.geod.s.h, 1));
+                    output += to_label("\tpowerin", to_floating(state.node.phys.powgen, 2));
+                    output += to_label("\tland", (event.flag & EVENT_FLAG_LAND) != 0);
+                    output += to_label("\tumbra", (event.flag & EVENT_FLAG_UMBRA) != 0);
+                    output += to_label("\tgs", (event.flag & EVENT_FLAG_GS) != 0);
+                    printf("%s\n", output.c_str());
+                }
+                if (postevent)
+                {
+                    json11::Json jobj = json_event_payload(state.node.name, event);
+                    socket_post(data_channel_out, jobj.dump().c_str());
+                    agent->post(Agent::AgentMessage::EVENT, jobj.dump());
+                }
+            }
+            if (printevent)
+            {
+                string output = "type: node";
+                output += to_label("\tnode", state.node.name);
+                output += to_label("\tutc", to_mjd(state.node.utc));
+                for (uint16_t axis = 0; axis < 3; ++axis)
+                {
+                    const char axisname[] = {'x', 'y', 'z'};
+                    output += to_label(string("\teci") + axisname[axis], to_floating(state.node.loc.pos.eci.s.col[axis], 1));
+                }
+                for (uint16_t axis = 0; axis < 3; ++axis)
+                {
+                    const char axisname[] = {'x', 'y', 'z'};
+                    output += to_label(string("\teciv") + axisname[axis], to_floating(state.node.loc.pos.eci.v.col[axis], 2));
+                }
+                for (uint16_t axis = 0; axis < 3; ++axis)
+                {
+                    const char axisname[] = {'x', 'y', 'z'};
+                    output += to_label(string("\tecia") + axisname[axis], to_floating(state.node.loc.pos.eci.a.col[axis], 3));
+                }
+                output += to_label("\tpowerin", to_floating(state.node.phys.powgen, 2));
+                output += to_label("\tpowerout", to_floating(state.node.phys.powuse, 2));
+                cartpos delta = eci2lvlh(results[elapsed][0].node.loc.pos.eci, state.node.loc.pos.eci);
+                output += to_label("\tdeltax", to_floating(delta.s.col[0], 2));
+                output += to_label("\tdeltay", to_floating(delta.s.col[1], 2));
+                output += to_label("\tdeltaz", to_floating(delta.s.col[2], 2));
+                output += to_label("\tdeltavx", to_floating(delta.v.col[0], 3));
+                output += to_label("\tdeltavy", to_floating(delta.v.col[1], 3));
+                output += to_label("\tdeltavz", to_floating(delta.v.col[2], 3));
+                printf("%s\n", output.c_str());
+            }
+        }
+    }
+
+    // Coverage summary over every node and target: total area, running mean of
+    // percent, and best (smallest) resolution among observed samples.
+    double total_area = 0., average_percent = 0., min_resolution = std::numeric_limits<double>::max();
+    size_t observed = 0;
+    for (auto &step : results)
+    {
+        for (auto &state : step)
+        {
+            for (auto &target : state.target)
+            {
+                if (target.cover[0].area == 0.) { continue; }
+                ++observed;
+                total_area += target.cover[0].area;
+                average_percent += (target.cover[0].percent - average_percent) / observed;
+                min_resolution = std::min(min_resolution, static_cast<double>(target.cover[0].resolution));
+            }
+        }
+    }
+    if (observed == 0) { min_resolution = 0.; }
+    cout << "summary, total_area: " << total_area << ", average_percent: " << average_percent
+         << ", min_resolution: " << min_resolution << endl;
+
+    if (!outdir.empty())
+    {
+        COSMOS_MKDIR(outdir.c_str(), 00777);  // single level; outdir's parent must exist
+        write_position_files("sat", "eci", [](const cosmosstruc &s, size_t) -> const cartpos & { return s.node.loc.pos.eci; }, false);
+        write_position_files("sat", "geoc", [](const cosmosstruc &s, size_t) -> const cartpos & { return s.node.loc.pos.geoc; }, false);
+        write_position_files("target", "eci", [](const cosmosstruc &s, size_t n) -> const cartpos & { return s.target[n].loc.pos.eci; }, true);
+        write_position_files("target", "geoc", [](const cosmosstruc &s, size_t n) -> const cartpos & { return s.target[n].loc.pos.geoc; }, true);
+    }
+    return 0;
+}
+
 int32_t parse_control(string args)
 {
     uint16_t argcount = 0;
@@ -1320,6 +1476,16 @@ int32_t parse_control(string args)
     //        ++argcount;
     //        thrustctl = jargs["thrustctl"].number_value();
     //    }
+    if (!jargs["batch"].is_null())
+    {
+        ++argcount;
+        batch = jargs["batch"].number_value();
+    }
+    if (!jargs["outdir"].is_null())
+    {
+        ++argcount;
+        outdir = jargs["outdir"].string_value();
+    }
     if (!jargs["summarize"].is_null())
     {
         ++argcount;
@@ -1359,6 +1525,7 @@ int32_t parse_control(string args)
     {
         ++argcount;
         initialutc = jargs["initialutc"].number_value();
+        initialutc_given = true;
     }
     else
     {

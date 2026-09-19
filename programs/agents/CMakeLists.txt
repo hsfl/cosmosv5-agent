@@ -7,10 +7,8 @@ message(${files})
 
 foreach(file ${files})
     get_filename_component(bfile ${file} NAME_WE)
-    if(NOT ${bfile} STREQUAL "agent_propagator")
-        add_executable(${bfile} ${bfile}.cpp)
-        install(TARGETS ${bfile} DESTINATION bin)
-    endif()
+    add_executable(${bfile} ${bfile}.cpp)
+    install(TARGETS ${bfile} DESTINATION bin)
 endforeach()
 
 target_link_libraries(agent CosmosAgent)
@@ -24,21 +22,6 @@ target_link_libraries(agent_route CosmosAgent)
 target_link_libraries(agent_time CosmosAgent)
 target_link_libraries(agent_tunnel CosmosAgent CosmosDeviceSerial)
 target_link_libraries(agent_tunnel2 CosmosAgent CosmosDeviceSerial)
-
-# Read the contents of the default propagator setup files and generate a C++ header file
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/data/sats.dat" SAT_FILE)
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/data/targets.dat" TARGET_FILE)
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/data/tle.dat" TLE_FILE)
-
-# Generate header/source file with the file contents as a string literal
-# To be used by agent_propagator to write the default files to the realms folder if it doesn't already exist
-set(OUTPUT_FILE "${CMAKE_BINARY_DIR}/data/demo/propagate_realm_defaults.h")
-file(WRITE ${OUTPUT_FILE} "#pragma once\n\nconst char* sat_default = R\"(${SAT_FILE})\";\nconst char* target_default = R\"(${TARGET_FILE})\";\nconst char* tle_default = R\"(${TLE_FILE})\";\n")
-
-add_executable(agent_propagator agent_propagator.cpp)
-install(TARGETS agent_propagator DESTINATION bin)
-target_link_libraries(agent_propagator CosmosPacketHandler CosmosAgent CosmosSimulator CosmosPhysics)
-target_include_directories(agent_propagator PRIVATE "${CMAKE_BINARY_DIR}/data/demo")
 
 # ground-station agents moved to ground-station repo
 add_subdirectory(other)
