@@ -1114,7 +1114,11 @@ int32_t Structure::Setup(string stype)
                         "U3","U3X","U3Y","U3XY",
                         "U6","U6X","U6Y","U6XY",
                         "U12","U12X","U12Y","U12XY",
-                        "U16","U16X","U16Y","U16XY",
+                        // Must match Structure::Type's order exactly: names map
+                        // to enum values by list position, so a missing entry
+                        // (U16XX, U16YY, U16XXYY were) both drops that name to
+                        // NoType and shifts every later name onto the wrong Type.
+                        "U16","U16X","U16XX","U16Y","U16YY","U16XY","U16XXYY",
                         "HEX65W80H"
                     }, {0});
     }
