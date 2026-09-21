@@ -3102,6 +3102,22 @@ static uint16_t eventClosestBody(const Convert::locstruc &loc)
     return (earthgrav < moongrav) ? COSMOS_MOON : COSMOS_EARTH;
 }
 
+bool comm_link_clear(const Convert::locstruc &loc, const targetstruc &gs)
+{
+    if (gs.elto < gs.min) return false;
+    // Moon center in ECI = node eci - node sci (sci is Moon-centered).
+    rvector moon = rv_sub(loc.pos.eci.s, loc.pos.sci.s);
+    if (length_rv(loc.pos.sci.s) < 1.) return true;   // sci not populated
+    rvector a = loc.pos.eci.s;
+    rvector d = rv_sub(gs.loc.pos.eci.s, a);
+    double dd = dot_rv(d, d);
+    if (dd <= 0.) return true;
+    double t = dot_rv(rv_sub(moon, a), d) / dd;
+    if (t <= 0. || t >= 1.) return true;               // Moon not between them
+    rvector closest = rv_add(a, rv_smult(t, d));
+    return length_rv(rv_sub(closest, moon)) > RMOONM;
+}
+
 /// Returns the geodetic/selenographic position of the node for the closest body.
 Convert::geoidpos OrbitalEventGenerator::currentGeoidPos() const
 {
@@ -3116,6 +3132,7 @@ int32_t OrbitalEventGenerator::check_all_event(bool force_end)
     int32_t iretn = 0;
     iretn += check_umbra_event(force_end);
     iretn += check_target_events(force_end);
+    iretn += check_comm_event(force_end);
     iretn += check_land_event(force_end);
     for (int16_t i=-8; i<9; ++i)
     {
@@ -3500,6 +3517,36 @@ int32_t OrbitalEventGenerator::check_umbra_event(bool force_end)
     {
         return 0;
     }
+}
+
+// Comm: at least one ground station in view and not blocked by the Moon.
+// Emitted with EVENT_TYPE_MOON (the MED's former "Moon" column, now "Comm").
+int32_t OrbitalEventGenerator::check_comm_event(bool force_end)
+{
+    bool comm = false;
+    for (const auto &t : currentinfo->target)
+    {
+        if (t.type == NODE_TYPE_GROUNDSTATION && comm_link_clear(currentinfo->node.loc, t))
+        {
+            comm = true;
+            break;
+        }
+    }
+    bool starting = comm && comm_start == 0.;
+    bool ending = comm_start != 0. && (!comm || force_end);
+    if (!starting && !ending) return 0;
+    eventstruc cevent;
+    cevent.name = starting ? "COMMIN" : "COMMOUT";
+    cevent.type = EVENT_TYPE_MOON;
+    cevent.utc = currentutc;
+    cevent.utcexec = cevent.utc;
+    cevent.dtime = starting ? 0. : cevent.utc - comm_start;
+    cevent.flag = (2 * EVENT_SCALE_PRIORITY) | EVENT_FLAG_PAIR | EVENT_FLAG_COLOR_GREEN;
+    if (ending) cevent.flag |= EVENT_FLAG_EXIT;
+    cevent.pos = currentGeoidPos();
+    currentinfo->event.push_back(cevent);
+    comm_start = starting ? cevent.utc : 0.;
+    return starting ? 1 : 0;
 }
 
 int32_t OrbitalEventGenerator::check_target_events(bool force_end)
@@ -4160,6 +4207,11 @@ int32_t LunarPositionPropagator::Propagate(double nextutc)
         currentinfo->node.loc.pos.lvlh = tlvlh;
         currentinfo->node.loc.utc = currentinfo->node.loc.pos.utc;
     }
+
+    // This propagator integrates in the Moon-centered frame, so the Moon is by
+    // definition the closest body; nothing else in this path sets it, and
+    // frame-dependent conversions (LVLH, event generation) key off it.
+    currentinfo->node.loc.pos.extra.closest = COSMOS_MOON;
 
     //    Vector fp = currentinfo->node.phys.fpush;
     currentinfo->node.phys.fpush.clear();

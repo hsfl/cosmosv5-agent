@@ -56,6 +56,11 @@ namespace Cosmos
 {
     namespace Physics
     {
+        //! True if the node has a clear Comm link to the ground station: the station
+        //! sees the node above its minimum elevation and the Moon does not lie
+        //! between them. \param loc node location (eci/sci valid) \param gs station.
+        bool comm_link_clear(const Convert::locstruc &loc, const targetstruc &gs);
+
         class Structure
         {
         public:
@@ -557,6 +562,9 @@ namespace Cosmos
             double minlat = 0.;
             //! Track when an umbra region starts
             double umbra_start = 0.;
+            //! Track when Comm (ground station in view and not blocked by the Moon) starts
+            double comm_start = 0.;
+            int32_t check_comm_event(bool force_end);
 //            //! Reference to target list in cosmosstruc
 //            vector<targetstruc>& targets;
 //            //! Reference to event list in cosmosstruc, orbital/physical events are appended to this as they occur

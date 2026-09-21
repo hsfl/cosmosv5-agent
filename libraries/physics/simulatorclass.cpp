@@ -2116,7 +2116,6 @@ void Simulator::slewBodyAxis(Physics::State &state,
     qatt &catt        = state.currentinfo.node.loc.att.icrf;
     double maxtorque  = state.currentinfo.node.phys.maxtorque;
     const Vector &moi = state.currentinfo.node.phys.moi;
-    if (maxtorque <= 0.) return;
 
     // Current direction of bodyAxis in ICRF frame.
     rvector curDir = transform_q(q_conjugate(catt.s), bodyAxis);
@@ -2127,9 +2126,18 @@ void Simulator::slewBodyAxis(Physics::State &state,
     if (angle < 1e-9) return;
 
     // Bang-bang slew time: t = 2*sqrt(angle * I_min / tau_max)
-    double I_min   = std::min({moi.x, moi.y, moi.z});
-    double t_slew  = 2.0 * std::sqrt(angle * I_min / maxtorque);
-    double stepAng = angle * std::min(1.0, dt / std::max(t_slew, dt));
+    double stepAng;
+    if (maxtorque > 0.)
+    {
+        double I_min   = std::min({moi.x, moi.y, moi.z});
+        double t_slew  = 2.0 * std::sqrt(angle * I_min / maxtorque);
+        stepAng = angle * std::min(1.0, dt / std::max(t_slew, dt));
+    }
+    else
+    {
+        // No torque limit defined for the node: nominal 0.5 deg/s slew rate.
+        stepAng = std::min(angle, RADOF(0.5) * dt);
+    }
 
     // Rotation axis in ICRF (cross of current to target direction).
     rvector axis = rv_normal(rv_cross(curDir, targetDirIcrf));
@@ -2147,6 +2155,10 @@ void Simulator::slewBodyAxis(Physics::State &state,
     catt.s   = q_mult(catt.s, q_conjugate(step_q));
     catt.utc = currentutc;
     att_set_icrf(state.currentinfo.node.loc);
+    // The LVLH attitude propagator rebuilds icrf from loc_req.att.lvlh every step,
+    // so persist the slewed attitude there or it is overwritten next step.
+    att_icrf2lvlh(state.currentinfo.node.loc);
+    state.currentinfo.node.loc_req.att.lvlh.s = state.currentinfo.node.loc.att.lvlh.s;
 }
 
 // Per-step attitude control: for each node, determine desired pointing direction
@@ -2171,7 +2183,7 @@ void Simulator::AttitudeStep()
         {
             const auto &t = ci.target[ti];
             if (t.type != 1 && t.type != 2) continue;
-            if (t.elto >= t.min && t.elto > bestEl) { bestGS = ti; bestEl = t.elto; }
+            if (comm_link_clear(loc, t) && t.elto > bestEl) { bestGS = ti; bestEl = t.elto; }
         }
 
         if (bestGS >= 0)
