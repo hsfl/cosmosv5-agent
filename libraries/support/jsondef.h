@@ -5245,6 +5245,8 @@ union as a ::devicestruc.
             double lasteventutc = 0.;
             //! Node Type as listed in \ref NODE_TYPE.
             uint16_t type = 0;
+            //! Structural type (e.g. "U12XY"): names the body the Simulator generates for this node.
+            string stype = "";
             //! Operational state
             uint16_t state = 0;
 
@@ -5284,6 +5286,7 @@ union as a ::devicestruc.
                     { "lastevent" , lastevent },
                     { "lasteventutc" , lasteventutc },
                     { "type" , type },
+                    { "stype" , stype },
                     { "state" , state },
                     { "flags" , flags },
                     { "powmode" , powmode },
@@ -5321,6 +5324,7 @@ union as a ::devicestruc.
                     if(!parsed["lastevent"].is_null())		{ lastevent = parsed["lastevent"].string_value(); }
                     if(!parsed["lasteventutc"].is_null())	{ lasteventutc = parsed["lasteventutc"].number_value(); }
                     if(!parsed["type"].is_null())	{ type = parsed["type"].long_value(); }
+                    if(!parsed["stype"].is_null())	{ stype = parsed["stype"].string_value(); }
                     if(!parsed["state"].is_null())	{ state = parsed["state"].long_value(); }
 
                     if(!parsed["flags"].is_null())	{ flags = parsed["flags"].long_value(); }

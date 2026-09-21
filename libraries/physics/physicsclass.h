@@ -691,6 +691,8 @@ namespace Cosmos
             MetricGenerator *metric;
 
             string stype;
+            //! Node payload text (<realm>/nodes/<name>.json) overlaid on the generated body by Init(), if any
+            string overlay;
             Structure *structure;
 
             int32_t Init(string name, double idt, string stype, Propagator::Type ptype, Propagator::Type atype, Propagator::Type ttype, Propagator::Type etype);

@@ -905,6 +905,8 @@ int32_t Simulator::ParseSatString(string args)
     {
         ++argcount;
         type = jargs["type"].string_value();
+        std::cerr << "Warning: sats.dat \"type\" is deprecated (node \"" << jargs["nodename"].string_value()
+                  << "\"): set node.stype in <realm>/nodes/<name>.json; the node file wins when both exist." << std::endl;
     }
     if (!jargs["nodename"].is_null())
     {
@@ -1424,6 +1426,15 @@ int32_t Simulator::NudgeNode(string nodename, cartpos pos, qatt att)
 Simulator::StateList::iterator Simulator::AddNode(string nodename, uint8_t propagation_priority)
 {
     Physics::State* newstate = new Physics::State(nodename, propagation_priority);
+
+    // <realm>/nodes/<name>.json, if present, names the body (stype) and adds or
+    // adjusts hardware over the generated baseline; see State::Init.
+    ifstream nodefile(get_realmdir(realmname) + "/nodes/" + nodename + ".json");
+    if (nodefile.is_open())
+    {
+        newstate->overlay.assign((std::istreambuf_iterator<char>(nodefile)), std::istreambuf_iterator<char>());
+    }
+
     StateList::iterator it = std::upper_bound(cnodes.begin(), cnodes.end(), newstate, compareByPriority);
     return cnodes.insert(it, newstate);
 }

@@ -366,6 +366,12 @@ int32_t json_soh_payload_load(cosmosstruc *cinfo, const string &s);
 //! wrongly pull in realm-wide/runtime fields like target/event/sim_states).
 json11::Json json_node_payload(const cosmosstruc *cinfo);
 int32_t json_node_payload_load(cosmosstruc *cinfo, const string &s);
+//! The node payload doubles as a hardware overlay: json_node_overlay() applies
+//! one over a node's existing pieces/devices by piece name (adding what is
+//! missing), and json_node_payload_stype() reads the structural type that
+//! names the generated body it overlays.
+string json_node_payload_stype(const string &s);
+int32_t json_node_overlay(cosmosstruc *cinfo, const string &s);
 
 //! Target "shortcut": compact, hand-authorable form of one permanent physical
 //! target (an Earth or Moon surface point/area), and the element type of

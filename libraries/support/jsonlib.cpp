@@ -12299,6 +12299,59 @@ int32_t json_soh_payload_load(cosmosstruc *cinfo, const string &s)
     return 0;
 }
 
+// Every device type, as (DeviceType name, devspec member): the one list the
+// type dispatch below is generated from.
+#define COSMOS_DEVICE_TYPES(X) \
+    X(ANT,ant) X(BATT,batt) X(BB,bb) X(BCREG,bcreg) X(BUS,bus) X(CAM,cam) X(COOLER,cooler) \
+    X(CPU,cpu) X(DISK,disk) X(GPS,gps) X(GYRO,gyro) X(HTR,htr) X(IMU,imu) X(LENS,lens) \
+    X(MAG,mag) X(MCC,mcc) X(MOTR,motr) X(MTR,mtr) X(NTELEM,ntelem) X(PLOAD,pload) \
+    X(PROP,prop) X(PSEN,psen) X(PVSTRG,pvstrg) X(ROT,rot) X(RW,rw) X(RXR,rxr) X(SSEN,ssen) \
+    X(STELEM,stelem) X(STT,stt) X(SUCHI,suchi) X(SWCH,swch) X(TCU,tcu) X(TCV,tcv) \
+    X(TELEM,telem) X(THST,thst) X(TNC,tnc) X(TSEN,tsen) X(TXR,txr) X(XYZSEN,xyzsen)
+
+//! The generic device record of devspec's (type, didx) entry, or nullptr.
+static devicestruc *devspec_device(devspecstruc &ds, uint16_t type, uint16_t didx)
+{
+    switch (type)
+    {
+#define X(T, m) case DeviceType::T: return didx < ds.m.size() ? static_cast<devicestruc *>(&ds.m[didx]) : nullptr;
+        COSMOS_DEVICE_TYPES(X)
+#undef X
+    default: return nullptr;
+    }
+}
+
+//! Merge a JSON object's keys over one typed device's own JSON and reload it.
+//! Only keys present in \p spec change; everything else keeps its value.
+static void devspec_merge_specific(devspecstruc &ds, uint16_t type, uint16_t didx, const json11::Json &spec)
+{
+    if (!spec.is_object()) { return; }
+    switch (type)
+    {
+#define X(T, m) case DeviceType::T: { \
+        if (didx >= ds.m.size()) { return; } \
+        json11::Json::object merged = ds.m[didx].to_json().object_items(); \
+        for (auto &kv : spec.object_items()) { merged[kv.first] = kv.second; } \
+        ds.m[didx].from_json(json11::Json(merged).dump()); \
+        return; }
+        COSMOS_DEVICE_TYPES(X)
+#undef X
+    default: return;
+    }
+}
+
+//! The devspec JSON key ("disk", "txr", ...) for a device type, or "".
+static string devspec_key(uint16_t type)
+{
+    switch (type)
+    {
+#define X(T, m) case DeviceType::T: return #m;
+        COSMOS_DEVICE_TYPES(X)
+#undef X
+    default: return "";
+    }
+}
+
 //! Build the "node" shortcut payload.
 //! The curated node-description subset written to <realm>/nodes/<node>.json
 //! and used for jtype:"node" wire messages alike. NOT a full
@@ -12309,16 +12362,25 @@ int32_t json_soh_payload_load(cosmosstruc *cinfo, const string &s)
 //! \return JSON object, already tagged {"jtype":"node"}.
 json11::Json json_node_payload(const cosmosstruc *cinfo)
 {
+    // devspec's typed structs serialize only their device-specific fields, so
+    // each device's generic data (piece/index links, port, nominal power, ...)
+    // travels alongside as "devices".
+    json11::Json::array devices;
+    for (const devicestruc *dev : cinfo->device)
+    {
+        if (dev != nullptr) { devices.push_back(dev->to_json()); }
+    }
     return json11::Json::object {
         { "jtype", "node" },
         { "node", cinfo->node },
         { "pieces", cinfo->pieces },
         { "obj", cinfo->obj },
         { "devspec", cinfo->devspec },
+        { "devices", devices },
         { "port", cinfo->port },
         { "alias", cinfo->alias },
         { "piece_cnt", cinfo->piece_cnt },
-        { "device_cnt", cinfo->device_cnt },
+        { "device_cnt", static_cast<int>(cinfo->device.size()) },
         { "port_cnt", cinfo->port_cnt }
     };
 }
@@ -12340,9 +12402,24 @@ int32_t json_node_payload_load(cosmosstruc *cinfo, const string &s)
     }
     if (!p["node"].is_null()) { cinfo->node.from_json(p["node"].dump()); }
     if (!p["obj"].is_null()) { cinfo->obj.from_json(p["obj"].dump()); }
-    if (!p["devspec"].is_null()) { cinfo->devspec.from_json(p["devspec"].dump()); }
+    if (!p["devspec"].is_null())
+    {
+        // devspecstruc::from_json only updates elements that already exist, so
+        // size each typed vector to the payload's array before loading into it
+#define X(T, m) cinfo->devspec.m.resize(p["devspec"][#m].array_items().size()); \
+        cinfo->devspec.m##_cnt = cinfo->devspec.m.size();
+        COSMOS_DEVICE_TYPES(X)
+#undef X
+        cinfo->devspec.from_json(p["devspec"].dump());
+    }
+    // Restore each device's generic data; must precede json_updatecosmosstruc,
+    // which indexes devices by the cidx restored here.
+    for (auto &general : p["devices"].array_items())
+    {
+        devicestruc *dev = devspec_device(cinfo->devspec, general["type"].long_value(), general["didx"].long_value());
+        if (dev != nullptr) { dev->from_json(general.dump()); }
+    }
     if (!p["piece_cnt"].is_null()) { cinfo->piece_cnt = p["piece_cnt"].long_value(); }
-    if (!p["device_cnt"].is_null()) { cinfo->device_cnt = p["device_cnt"].long_value(); }
     if (!p["port_cnt"].is_null()) { cinfo->port_cnt = p["port_cnt"].long_value(); }
     for (size_t i = 0; i < p["pieces"].array_items().size(); ++i)
     {
@@ -12359,10 +12436,173 @@ int32_t json_node_payload_load(cosmosstruc *cinfo, const string &s)
         if (i >= cinfo->alias.size()) { cinfo->alias.emplace_back(); }
         cinfo->alias[i].from_json(p["alias"][i].dump());
     }
+    // Size "device" by the devices actually present (the payload's device_cnt
+    // is not maintained by json_adddevice), and check the links json_update-
+    // cosmosstruc will index by before it does: every device needs its own slot.
+    size_t total = 0;
+#define X(T, m) total += cinfo->devspec.m.size();
+    COSMOS_DEVICE_TYPES(X)
+#undef X
+    if (p["devices"].array_items().empty())
+    {
+        // No generic device data (hand-written payload): number them in devspec order
+        uint16_t next = 0;
+#define X(T, m) for (size_t i = 0; i < cinfo->devspec.m.size(); ++i) { \
+            cinfo->devspec.m[i].type = DeviceType::T; cinfo->devspec.m[i].didx = i; cinfo->devspec.m[i].cidx = next++; }
+        COSMOS_DEVICE_TYPES(X)
+#undef X
+    }
+    vector<bool> used(total, false);
+    bool valid = true;
+#define X(T, m) for (auto &dev : cinfo->devspec.m) { \
+        if (dev.cidx >= total || used[dev.cidx]) { valid = false; } else { used[dev.cidx] = true; } }
+    COSMOS_DEVICE_TYPES(X)
+#undef X
+    if (!valid)
+    {
+        return COSMOS_JSON_ERROR_JSTRING;
+    }
+    cinfo->device_cnt = total;
     cinfo->device.clear();
-    cinfo->device.resize(cinfo->device_cnt);
+    cinfo->device.resize(total);
     json_updatecosmosstruc(cinfo);
     return 0;
+}
+
+//! The structural type ("U12XY", ...) named by a node payload, or "" if none.
+string json_node_payload_stype(const string &s)
+{
+    string error;
+    json11::Json p = json11::Json::parse(s, error);
+    if (!error.empty()) { return ""; }
+    return p["node"]["stype"].string_value();
+}
+
+//! Overlay a node payload onto a node that already has a baseline set of
+//! pieces and devices (the Simulator's generated body), matching by piece name.
+//!
+//! - A device whose piece name already exists has the file's fields applied over
+//!   it — only fields actually present in the file; the rest keep their values.
+//! - A device with no matching piece is created (piece and device) and
+//!   filled from the file. Ports it names are created too.
+//! - Piece properties (mass, density, emi, abs, hcap, hcon, enabled) are applied
+//!   to existing pieces by name. Pieces the file has but the baseline lacks are
+//!   not created unless they carry a device: geometry belongs to "stype".
+//! - The structural links (cidx/didx/pidx/bidx and the piece/device indexes) are
+//!   never taken from the file; portidx is remapped by port name. Live state
+//!   (node loc/utc/state/phys) is not touched.
+//! \param cinfo Node to overlay onto.
+//! \param s Node payload JSON, as written by json_node_payload().
+//! \return Number of devices applied or added, or negative error.
+int32_t json_node_overlay(cosmosstruc *cinfo, const string &s)
+{
+    string error;
+    json11::Json p = json11::Json::parse(s, error);
+    if (!error.empty()) { return COSMOS_JSON_ERROR_JSTRING; }
+
+    if (!p["node"]["type"].is_null()) { cinfo->node.type = p["node"]["type"].long_value(); }
+
+    // Ports first, so devices can be wired to them by name
+    vector<int32_t> portmap;
+    for (auto &fport : p["port"].array_items())
+    {
+        portmap.push_back(json_createport(cinfo, fport["name"].string_value(), static_cast<PORT_TYPE>(fport["type"].long_value())));
+    }
+
+    // Piece properties, presence-based
+    for (auto &fpiece : p["pieces"].array_items())
+    {
+        for (piecestruc &piece : cinfo->pieces)
+        {
+            if (piece.name != fpiece["name"].string_value()) { continue; }
+            if (!fpiece["enabled"].is_null()) { piece.enabled = fpiece["enabled"].bool_value(); }
+            if (!fpiece["mass"].is_null()) { piece.mass = fpiece["mass"].number_value(); }
+            if (!fpiece["density"].is_null()) { piece.density = fpiece["density"].number_value(); }
+            if (!fpiece["emi"].is_null()) { piece.emi = fpiece["emi"].number_value(); }
+            if (!fpiece["abs"].is_null()) { piece.abs = fpiece["abs"].number_value(); }
+            if (!fpiece["hcap"].is_null()) { piece.hcap = fpiece["hcap"].number_value(); }
+            if (!fpiece["hcon"].is_null()) { piece.hcon = fpiece["hcon"].number_value(); }
+            break;
+        }
+    }
+
+    int32_t applied = 0;
+    for (auto &general : p["devices"].array_items())
+    {
+        uint16_t type = general["type"].long_value();
+        if (type >= DeviceType::COUNT) { continue; }
+
+        string name = general["name"].string_value();
+        if (name.empty() && general["pidx"].long_value() < static_cast<int>(p["pieces"].array_items().size()))
+        {
+            name = p["pieces"][general["pidx"].long_value()]["name"].string_value();
+        }
+        if (name.empty()) { continue; }
+
+        // Existing piece by name, else create it (with its device)
+        int32_t pidx = -1;
+        for (size_t i = 0; i < cinfo->pieces.size(); ++i)
+        {
+            if (cinfo->pieces[i].name == name) { pidx = i; break; }
+        }
+        if (pidx < 0)
+        {
+            pidx = json_createpiece(cinfo, name, static_cast<DeviceType>(type));
+            if (pidx < 0) { continue; }
+        }
+        uint16_t cidx = cinfo->pieces[pidx].cidx;
+        if (cidx >= cinfo->device.size() || cinfo->device[cidx] == nullptr || cinfo->device[cidx]->type != type)
+        {
+            // Piece exists but has no device of this type: leave it alone
+            continue;
+        }
+        devicestruc *dev = cinfo->device[cidx];
+
+        // Generic fields: file keys over the device's own, minus structural links
+        json11::Json::object merged = dev->to_json().object_items();
+        for (auto &kv : general.object_items())
+        {
+            const string &key = kv.first;
+            if (key == "cidx" || key == "didx" || key == "pidx" || key == "bidx" || key == "name" || key == "type")
+            {
+                continue;
+            }
+            if (key == "portidx")
+            {
+                size_t fidx = kv.second.long_value();
+                if (fidx < portmap.size() && portmap[fidx] >= 0) { merged[key] = portmap[fidx]; }
+                continue;
+            }
+            merged[key] = kv.second;
+        }
+        dev->from_json(json11::Json(merged).dump());
+
+        // Specific fields, from the file's devspec entry for this device
+        string key = devspec_key(type);
+        if (!key.empty())
+        {
+            devspec_merge_specific(cinfo->devspec, type, dev->didx, p["devspec"][key][general["didx"].long_value()]);
+        }
+        ++applied;
+    }
+
+    for (auto &falias : p["alias"].array_items())
+    {
+        bool known = false;
+        for (auto &alias : cinfo->alias)
+        {
+            if (alias.name == falias["name"].string_value()) { known = true; break; }
+        }
+        if (!known)
+        {
+            aliasstruc alias;
+            alias.from_json(falias.dump());
+            cinfo->alias.push_back(alias);
+        }
+    }
+
+    json_updatecosmosstruc(cinfo);
+    return applied;
 }
 
 void json_test(cosmosstruc *cinfo)
