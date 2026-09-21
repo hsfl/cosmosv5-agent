@@ -2189,7 +2189,8 @@ void Simulator::AttitudeStep()
         if (bestGS >= 0)
         {
             rvector tdir = rv_normal(rv_sub(ci.target[bestGS].loc.pos.eci.s, loc.pos.eci.s));
-            slewBodyAxis(*cnodes[ni], rv_smult(-1., rv_unitz()), tdir, dt, currentutc);
+            // Antenna axis: body -Y (a guess until the real antenna location is known)
+            slewBodyAxis(*cnodes[ni], rv_smult(-1., rv_unity()), tdir, dt, currentutc);
             continue;
         }
 
@@ -2210,7 +2211,8 @@ void Simulator::AttitudeStep()
             {
                 if (m_trackingMode == 2) claimed.insert(bestTgt);
                 rvector tdir = rv_normal(rv_sub(ci.target[bestTgt].loc.pos.eci.s, loc.pos.eci.s));
-                slewBodyAxis(*cnodes[ni], rv_smult(-1., rv_unitz()), tdir, dt, currentutc);
+                // Instruments look along body +Z (long axis, nadir at identity LVLH)
+                slewBodyAxis(*cnodes[ni], rv_unitz(), tdir, dt, currentutc);
                 continue;
             }
         }
