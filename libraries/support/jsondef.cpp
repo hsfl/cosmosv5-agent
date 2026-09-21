@@ -2685,8 +2685,7 @@ namespace Cosmos
                     add_name(basename+".goodratio", &devspec.txr[didx].goodratio, "double");
                     add_name(basename+".utcout", &devspec.txr[didx].utcout, "double");
                     add_name(basename+".uptime", &devspec.txr[didx].uptime, "double");
-                    add_name(basename+".bytesout", &devspec.tcv[didx].bytesout, "int32_t");
-                    add_name(basename+".bytesin", &devspec.rxr[didx].bytesin, "int32_t");
+                    add_name(basename+".bytesout", &devspec.txr[didx].bytesout, "int32_t");
                     break;
                 case DeviceType::XYZSEN:
                     basename = "devspec.xyzsen[" + std::to_string(didx) + "]";
