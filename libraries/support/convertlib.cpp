@@ -230,6 +230,8 @@ int32_t pos_lvlh(locstruc &loc)
     loc.pos.extra.l2e = {{0., 0., 0.}, 1.};
     loc.pos.extra.g2l = {{0., 0., 0.}, 1.};
     loc.pos.extra.l2g = {{0., 0., 0.}, 1.};
+    loc.pos.extra.s2l = {{0., 0., 0.}, 1.};
+    loc.pos.extra.l2s = {{0., 0., 0.}, 1.};
     rvector lvlh_z = {0., 0., 1.}, lvlh_y = {0., 1., 0.}, planec_z = {0., 0., 0.}, planec_y = {0., 0., 0.};
 
     cartpos *ppos;
@@ -331,6 +333,34 @@ int32_t pos_lvlh(locstruc &loc)
     loc.pos.extra.g2l = q_fmult(qe_z, qe_y);
     normalize_q(&loc.pos.extra.g2l);
     loc.pos.extra.l2g = q_conjugate(loc.pos.extra.g2l);
+
+    // SELC based LVLH: same construction about the Moon-fixed position. Left as
+    // identity if selc has not been set (zero position), rather than dividing by it.
+    ppos = &loc.pos.selc;
+    if (length_rv(ppos->s) >= 1e6)
+    {
+        // LVLH Z is opposite of direction to satellite
+        planec_z = rv_smult(-1., ppos->s);
+        normalize_rv(planec_z);
+
+        // LVLH Y is Cross Product of LVLH Z and velocity vector
+        planec_y = rv_cross(planec_z, ppos->v);
+        normalize_rv(planec_y);
+
+        // Determine intrinsic rotation of selenocentric Z into LVLH Z
+        qe_z = q_conjugate(q_drotate_between_rv(planec_z, lvlh_z));
+
+        // Use to intrinsically rotate selenocentric Y into intermediate Y
+        planec_y = irotate(qe_z, planec_y);
+
+        // Determine intrinsic rotation of this intermediate Y into LVLH Y
+        qe_y = q_conjugate(q_drotate_between_rv(planec_y, lvlh_y));
+
+        // Combine to determine intrinsic rotation of selenocentric into LVLH
+        loc.pos.extra.s2l = q_fmult(qe_z, qe_y);
+        normalize_q(&loc.pos.extra.s2l);
+        loc.pos.extra.l2s = q_conjugate(loc.pos.extra.s2l);
+    }
 
     return 0;
 }
@@ -2523,27 +2553,6 @@ int32_t att_selc(locstruc &loc)
     return 0;
 }
 
-// LVLH rotation (body-fixed frame -> LVLH) for an arbitrary position/velocity
-// pair, same construction as pos_lvlh()'s g2l: LVLH Z opposite the position
-// (nadir), LVLH Y = Z x velocity, X completing the triad (roughly along the
-// velocity). pos_lvlh() only builds this for the geocentric (and ECI-based)
-// case, but att_lvlh2planec()/att_planec2lvlh() need it about the body being
-// orbited — for the Moon that's the selenocentric position, not the geocentric.
-static quaternion lvlh_rotation_from(const cartpos &p)
-{
-    rvector lvlh_z = {0., 0., 1.}, lvlh_y = {0., 1., 0.};
-    rvector planec_z = rv_smult(-1., p.s);
-    normalize_rv(planec_z);
-    rvector planec_y = rv_cross(planec_z, p.v);
-    normalize_rv(planec_y);
-    quaternion qe_z = q_conjugate(q_drotate_between_rv(planec_z, lvlh_z));
-    planec_y = irotate(qe_z, planec_y);
-    quaternion qe_y = q_conjugate(q_drotate_between_rv(planec_y, lvlh_y));
-    quaternion p2l = q_fmult(qe_z, qe_y);
-    normalize_q(&p2l);
-    return p2l;
-}
-
 int32_t att_icrf2lvlh(locstruc *loc)
 {
     att_icrf2lvlh(*loc);
@@ -2681,14 +2690,13 @@ int32_t att_planec2lvlh(locstruc &loc)
     rvector alpha = rv_smult(1. / (radius * radius), rv_cross(ppos->s, ppos->v));
     loc.att.lvlh.v = rv_sub(patt->v, alpha);
 
-    // Transform ITRS (or, near the Moon, the Moon-fixed frame) into LVLH. The
-    // LVLH axes must come from the position of the body actually being
-    // orbited — extra.g2l/l2g are geocentric and are wrong at the Moon.
+    // Transform ITRS (or, near the Moon, the Moon-fixed frame) into LVLH, using
+    // the LVLH axes of the body actually being orbited
     quaternion p2l = loc.pos.extra.g2l, l2p = loc.pos.extra.l2g;
     if (loc.pos.extra.closest == COSMOS_MOON)
     {
-        p2l = lvlh_rotation_from(loc.pos.selc);
-        l2p = q_conjugate(p2l);
+        p2l = loc.pos.extra.s2l;
+        l2p = loc.pos.extra.l2s;
     }
     loc.att.lvlh.s = q_fmult(l2p, patt->s);
     loc.att.lvlh.v = irotate(p2l, loc.att.lvlh.v);
@@ -2745,13 +2753,13 @@ int32_t att_lvlh2planec(locstruc &loc)
 
     //    pos_lvlh(loc.att.lvlh.utc, loc);
 
-    // Rotate LVLH frame into ITRS frame (Moon-fixed frame near the Moon, with
-    // LVLH axes from the selenocentric position — g2l/l2g are geocentric).
+    // Rotate LVLH frame into ITRS frame (Moon-fixed frame near the Moon), using
+    // the LVLH axes of the body actually being orbited
     quaternion p2l = loc.pos.extra.g2l, l2p = loc.pos.extra.l2g;
     if (loc.pos.extra.closest == COSMOS_MOON)
     {
-        p2l = lvlh_rotation_from(loc.pos.selc);
-        l2p = q_conjugate(p2l);
+        p2l = loc.pos.extra.s2l;
+        l2p = loc.pos.extra.l2s;
     }
     patt->s = q_fmult(p2l, loc.att.lvlh.s);
     patt->v = irotate(l2p, loc.att.lvlh.v);
@@ -6301,6 +6309,8 @@ int stk2eci(double utc, stkstruc &stk, cartpos &eci)
         << a.e2l << "\t"
         << a.l2g << "\t"
         << a.g2l << "\t"
+        << a.l2s << "\t"
+        << a.s2l << "\t"
         << a.sun2earth << "\t"
         << a.sun2moon << "\t"
         << a.closest;
@@ -6309,7 +6319,7 @@ int stk2eci(double utc, stkstruc &stk, cartpos &eci)
 
 ::std::istream &operator>>(::std::istream &in, extrapos &a)
 {
-    in >> a.utc >> a.tt >> a.ut >> a.tdb >> a.j2e >> a.dj2e >> a.ddj2e >> a.e2j >> a.de2j >> a.dde2j >> a.j2t >> a.j2s >> a.t2j >> a.s2j >> a.s2t >> a.ds2t >> a.t2s >> a.dt2s >> a.e2l >> a.l2e >> a.g2l >> a.l2g >> a.sun2earth >> a.sun2moon >> a.closest;
+    in >> a.utc >> a.tt >> a.ut >> a.tdb >> a.j2e >> a.dj2e >> a.ddj2e >> a.e2j >> a.de2j >> a.dde2j >> a.j2t >> a.j2s >> a.t2j >> a.s2j >> a.s2t >> a.ds2t >> a.t2s >> a.dt2s >> a.e2l >> a.l2e >> a.g2l >> a.l2g >> a.l2s >> a.s2l >> a.sun2earth >> a.sun2moon >> a.closest;
     return in;
 }
 
