@@ -2944,6 +2944,8 @@ int32_t OrbitalEventGenerator::Init()
     currentinfo->event_tick = (time_start + currentinfo->event_tick) - time_start;
     time_end = time_start + currentinfo->event_tick;
     umbra_start = 0.;
+    moon_start = 0.;
+    in_moon = false;
     land_start = 0.;
     gs_AoS.clear();
     return 0;
@@ -2955,6 +2957,8 @@ int32_t OrbitalEventGenerator::Reset()
     time_start = currentinfo->node.loc.utc;
     time_end = time_start + currentinfo->event_tick;
     umbra_start = 0.;
+    moon_start = 0.;
+    in_moon = false;
     land_start = 0.;
     gs_AoS.clear();
     return 0;
@@ -3122,13 +3126,6 @@ bool comm_link_clear(const Convert::locstruc &loc, const targetstruc &gs)
     return !moon_blocks(loc.pos.eci.s, gs.loc.pos.eci.s, moon);
 }
 
-bool earth_visible(const Convert::locstruc &loc)
-{
-    if (length_rv(loc.pos.sci.s) < 1.) return true;
-    rvector moon = rv_sub(loc.pos.eci.s, loc.pos.sci.s);
-    return !moon_blocks(loc.pos.eci.s, rv_zero(), moon);  // Earth center is the ECI origin
-}
-
 /// Returns the geodetic/selenographic position of the node for the closest body.
 Convert::geoidpos OrbitalEventGenerator::currentGeoidPos() const
 {
@@ -3143,7 +3140,7 @@ int32_t OrbitalEventGenerator::check_all_event(bool force_end)
     int32_t iretn = 0;
     iretn += check_umbra_event(force_end);
     iretn += check_target_events(force_end);
-    iretn += check_comm_event(force_end);
+    iretn += check_moon_event(force_end);
     iretn += check_land_event(force_end);
     for (int16_t i=-8; i<9; ++i)
     {
@@ -3530,26 +3527,41 @@ int32_t OrbitalEventGenerator::check_umbra_event(bool force_end)
     }
 }
 
-// Comm: Earth not blocked by the Moon.
-// Emitted with EVENT_TYPE_MOON (the MED's former "Moon" column, now "Comm").
-int32_t OrbitalEventGenerator::check_comm_event(bool force_end)
+// Moon-blocks-Earth ("NoEarth"): MOONIN/MOONOUT pair, ported from src/core.
+// Only meaningful near the Moon; elsewhere treated as unblocked so an
+// already-active pair still closes out via the normal end condition.
+int32_t OrbitalEventGenerator::check_moon_event(bool force_end)
 {
-    // Comm (for now): Earth not blocked by the Moon; ground stations are not considered.
-    bool comm = earth_visible(currentinfo->node.loc);
-    bool starting = comm && comm_start == 0.;
-    bool ending = comm_start != 0. && (!comm || force_end);
+    bool blocked = false;
+    if (eventClosestBody(currentinfo->node.loc) == COSMOS_MOON)
+    {
+        // Moon at the origin of the SCI frame; Earth is moon2earth = sun2earth - sun2moon.
+        rvector sc = currentinfo->node.loc.pos.sci.s;
+        rvector earth = rv_sub(currentinfo->node.loc.pos.extra.sun2earth.s,
+                               currentinfo->node.loc.pos.extra.sun2moon.s);
+        blocked = moon_blocks(sc, earth, rv_zero());
+    }
+
+    bool starting = blocked && moon_start == 0.;
+    bool ending = moon_start != 0. && (!blocked || force_end);
     if (!starting && !ending) return 0;
+    in_moon = starting;
     eventstruc cevent;
-    cevent.name = starting ? "COMMIN" : "COMMOUT";
+    cevent.name = starting ? "MOONIN" : "MOONOUT";
     cevent.type = EVENT_TYPE_MOON;
     cevent.utc = currentutc;
     cevent.utcexec = cevent.utc;
-    cevent.dtime = starting ? 0. : cevent.utc - comm_start;
-    cevent.flag = (2 * EVENT_SCALE_PRIORITY) | EVENT_FLAG_PAIR | EVENT_FLAG_COLOR_GREEN;
-    if (ending) cevent.flag |= EVENT_FLAG_EXIT;
+    cevent.dtime = starting ? 0. : cevent.utc - moon_start;
+    cevent.flag = (2 * EVENT_SCALE_PRIORITY) | EVENT_FLAG_PAIR | EVENT_FLAG_COLOR_GRAY;
+    if (starting) cevent.flag |= EVENT_FLAG_MOON;
+    else          cevent.flag |= EVENT_FLAG_EXIT;
+    if (in_land)  cevent.flag |= EVENT_FLAG_LAND;
+    if (in_umbra) cevent.flag |= EVENT_FLAG_UMBRA;
+    if (in_gs)    cevent.flag |= EVENT_FLAG_GS;
+    if (in_targ)  cevent.flag |= EVENT_FLAG_TARG;
     cevent.pos = currentGeoidPos();
     currentinfo->event.push_back(cevent);
-    comm_start = starting ? cevent.utc : 0.;
+    moon_start = starting ? cevent.utc : 0.;
     return starting ? 1 : 0;
 }
 
