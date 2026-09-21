@@ -1808,6 +1808,15 @@ int32_t State::Init(string name, double idt, string stype, Propagator::Type ptyp
     currentinfo.node.name = name;
     currentinfo.agent0.name = "sim";
 
+    // The node file, when there is one, names the body to generate; the stype
+    // argument is only a fallback for nodes with no file (or none in it).
+    string filestype = json_node_payload_stype(overlay);
+    if (!filestype.empty())
+    {
+        stype = filestype;
+    }
+    currentinfo.node.stype = stype;
+
     uint32_t ctruc_idx = currentinfo.node.phys.strucs.size();
     structure = new Structure(&currentinfo.node.phys);
     structure->Setup(stype);
@@ -1899,10 +1908,23 @@ int32_t State::Init(string name, double idt, string stype, Propagator::Type ptyp
     // EPS
     json_createpiece(&currentinfo, "battery", DeviceType::BATT);
 
+    // Node file: adjust the generated devices by piece name and add what is
+    // missing (radios, extra disks, ...). Before TSEN so added devices get one.
+    if (!overlay.empty())
+    {
+        iretn = json_node_overlay(&currentinfo, overlay);
+        if (iretn < 0)
+        {
+            return iretn;
+        }
+    }
+
     // TSEN
     uint16_t devcnt = currentinfo.device.size();
     for (uint16_t i=0; i<devcnt; ++i)
     {
+        // Overlay may have brought its own temperature sensors
+        if (currentinfo.device[i]->type == static_cast<uint16_t>(DeviceType::TSEN)) { continue; }
         json_createpiece(&currentinfo, "tsen_" + currentinfo.pieces[currentinfo.device[i]->pidx].name, DeviceType::TSEN);
     }
 
@@ -3065,10 +3087,25 @@ int32_t MetricGenerator::Reset(double nextutc)
     return 0;
 }
 
+/// Body the node is closest to. Uses pos.extra.closest when it is valid; propagators
+/// that advance sci/eci directly (e.g. LunarPositionPropagator) never set it, so
+/// otherwise derive it the same way pos_eci() does.
+static uint16_t eventClosestBody(const Convert::locstruc &loc)
+{
+    if (loc.pos.extra.closest == COSMOS_EARTH || loc.pos.extra.closest == COSMOS_MOON) {
+        return loc.pos.extra.closest;
+    }
+    rvector icrf_s = rv_add(loc.pos.eci.s, loc.pos.extra.sun2earth.s);
+    rvector sci_s = rv_sub(icrf_s, loc.pos.extra.sun2moon.s);
+    double moongrav  = MMOON  / (length_rv(sci_s) * length_rv(sci_s));
+    double earthgrav = MEARTH / (length_rv(loc.pos.eci.s) * length_rv(loc.pos.eci.s));
+    return (earthgrav < moongrav) ? COSMOS_MOON : COSMOS_EARTH;
+}
+
 /// Returns the geodetic/selenographic position of the node for the closest body.
 Convert::geoidpos OrbitalEventGenerator::currentGeoidPos() const
 {
-    switch (currentinfo->node.loc.pos.extra.closest) {
+    switch (eventClosestBody(currentinfo->node.loc)) {
         case COSMOS_MOON:  return currentinfo->node.loc.pos.selg;
         default:           return currentinfo->node.loc.pos.geod;
     }
@@ -3085,7 +3122,7 @@ int32_t OrbitalEventGenerator::check_all_event(bool force_end)
         iretn += check_lat_event(force_end, i*RADOF(10.));
     }
     // Update lastlat from the geodetic frame of the closest body
-    switch (currentinfo->node.loc.pos.extra.closest) {
+    switch (eventClosestBody(currentinfo->node.loc)) {
         case COSMOS_MOON:  lastlat = currentinfo->node.loc.pos.selg.s.lat; break;
         default:           lastlat = currentinfo->node.loc.pos.geod.s.lat; break;
     }
@@ -3098,7 +3135,7 @@ int32_t OrbitalEventGenerator::check_lat_event(bool force_end, float lat)
     int32_t iretn = 0;
     // Select geodetic frame of the closest body
     double curlat;
-    switch (currentinfo->node.loc.pos.extra.closest) {
+    switch (eventClosestBody(currentinfo->node.loc)) {
         case COSMOS_MOON:  curlat = currentinfo->node.loc.pos.selg.s.lat; break;
         default:           curlat = currentinfo->node.loc.pos.geod.s.lat; break;
     }
@@ -3304,7 +3341,7 @@ int32_t OrbitalEventGenerator::check_land_event(bool force_end)
     // Select geodetic frame and DEM body from the closest body
     double land_lat, land_lon, dem_scale;
     int dem_body;
-    switch (currentinfo->node.loc.pos.extra.closest) {
+    switch (eventClosestBody(currentinfo->node.loc)) {
         case COSMOS_MOON:
             land_lat  = currentinfo->node.loc.pos.selg.s.lat;
             land_lon  = currentinfo->node.loc.pos.selg.s.lon;
