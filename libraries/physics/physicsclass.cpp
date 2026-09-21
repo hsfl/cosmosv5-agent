@@ -3102,20 +3102,31 @@ static uint16_t eventClosestBody(const Convert::locstruc &loc)
     return (earthgrav < moongrav) ? COSMOS_MOON : COSMOS_EARTH;
 }
 
+// Is the Moon between point `a` and point `b` (both ECI)? `moon` is the Moon center, ECI.
+static bool moon_blocks(const rvector &a, const rvector &b, const rvector &moon)
+{
+    rvector d = rv_sub(b, a);
+    double dd = dot_rv(d, d);
+    if (dd <= 0.) return false;
+    double t = dot_rv(rv_sub(moon, a), d) / dd;
+    if (t <= 0. || t >= 1.) return false;              // Moon not between them
+    rvector closest = rv_add(a, rv_smult(t, d));
+    return length_rv(rv_sub(closest, moon)) <= RMOONM;
+}
+
 bool comm_link_clear(const Convert::locstruc &loc, const targetstruc &gs)
 {
     if (gs.elto < gs.min) return false;
-    // Moon center in ECI = node eci - node sci (sci is Moon-centered).
+    if (length_rv(loc.pos.sci.s) < 1.) return true;    // sci not populated
+    rvector moon = rv_sub(loc.pos.eci.s, loc.pos.sci.s); // Moon center in ECI
+    return !moon_blocks(loc.pos.eci.s, gs.loc.pos.eci.s, moon);
+}
+
+bool earth_visible(const Convert::locstruc &loc)
+{
+    if (length_rv(loc.pos.sci.s) < 1.) return true;
     rvector moon = rv_sub(loc.pos.eci.s, loc.pos.sci.s);
-    if (length_rv(loc.pos.sci.s) < 1.) return true;   // sci not populated
-    rvector a = loc.pos.eci.s;
-    rvector d = rv_sub(gs.loc.pos.eci.s, a);
-    double dd = dot_rv(d, d);
-    if (dd <= 0.) return true;
-    double t = dot_rv(rv_sub(moon, a), d) / dd;
-    if (t <= 0. || t >= 1.) return true;               // Moon not between them
-    rvector closest = rv_add(a, rv_smult(t, d));
-    return length_rv(rv_sub(closest, moon)) > RMOONM;
+    return !moon_blocks(loc.pos.eci.s, rv_zero(), moon);  // Earth center is the ECI origin
 }
 
 /// Returns the geodetic/selenographic position of the node for the closest body.
@@ -3519,19 +3530,12 @@ int32_t OrbitalEventGenerator::check_umbra_event(bool force_end)
     }
 }
 
-// Comm: at least one ground station in view and not blocked by the Moon.
+// Comm: Earth not blocked by the Moon.
 // Emitted with EVENT_TYPE_MOON (the MED's former "Moon" column, now "Comm").
 int32_t OrbitalEventGenerator::check_comm_event(bool force_end)
 {
-    bool comm = false;
-    for (const auto &t : currentinfo->target)
-    {
-        if (t.type == NODE_TYPE_GROUNDSTATION && comm_link_clear(currentinfo->node.loc, t))
-        {
-            comm = true;
-            break;
-        }
-    }
+    // Comm (for now): Earth not blocked by the Moon; ground stations are not considered.
+    bool comm = earth_visible(currentinfo->node.loc);
     bool starting = comm && comm_start == 0.;
     bool ending = comm_start != 0. && (!comm || force_end);
     if (!starting && !ending) return 0;

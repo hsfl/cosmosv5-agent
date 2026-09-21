@@ -60,6 +60,8 @@ namespace Cosmos
         //! sees the node above its minimum elevation and the Moon does not lie
         //! between them. \param loc node location (eci/sci valid) \param gs station.
         bool comm_link_clear(const Convert::locstruc &loc, const targetstruc &gs);
+        //! True if the Earth (center) is not blocked by the Moon as seen from the node.
+        bool earth_visible(const Convert::locstruc &loc);
 
         class Structure
         {
