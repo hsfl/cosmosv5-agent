@@ -567,6 +567,8 @@ namespace Cosmos
             bool in_moon = false;
             //! Checks for Moon-blocks-Earth (MOONIN/MOONOUT) events
             int32_t check_moon_event(bool force_end);
+            //! Flags for the states currently active (land, umbra, ground station, target, Moon), for OR-ing into events
+            uint32_t state_flags() const;
 //            //! Reference to target list in cosmosstruc
 //            vector<targetstruc>& targets;
 //            //! Reference to event list in cosmosstruc, orbital/physical events are appended to this as they occur

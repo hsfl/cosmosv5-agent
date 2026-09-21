@@ -3139,8 +3139,9 @@ int32_t OrbitalEventGenerator::check_all_event(bool force_end)
 {
     int32_t iretn = 0;
     iretn += check_umbra_event(force_end);
-    iretn += check_target_events(force_end);
+    // Before the rest, so in_moon is already current for every event built below
     iretn += check_moon_event(force_end);
+    iretn += check_target_events(force_end);
     iretn += check_land_event(force_end);
     for (int16_t i=-8; i<9; ++i)
     {
@@ -3188,22 +3189,6 @@ int32_t OrbitalEventGenerator::check_lat_event(bool force_end, float lat)
         cevent.utcexec = cevent.utc;
         cevent.dtime = 0.;
         cevent.flag = (2 * EVENT_SCALE_PRIORITY) | EVENT_FLAG_COLOR_CYAN;
-        if (in_land)
-        {
-            cevent.flag |= EVENT_FLAG_LAND;
-        }
-        if (in_umbra)
-        {
-            cevent.flag |= EVENT_FLAG_UMBRA;
-        }
-        if (in_gs)
-        {
-            cevent.flag |= EVENT_FLAG_GS;
-        }
-        if (in_targ)
-        {
-            cevent.flag |= EVENT_FLAG_TARG;
-        }
         cevent.pos = currentGeoidPos();
         currentinfo->event.push_back(cevent);
         ++iretn;
@@ -3219,22 +3204,6 @@ int32_t OrbitalEventGenerator::check_lat_event(bool force_end, float lat)
         cevent.utcexec = cevent.utc;
         cevent.dtime = 0.;
         cevent.flag = (2 * EVENT_SCALE_PRIORITY) | EVENT_FLAG_COLOR_CYAN;
-        if (in_land)
-        {
-            cevent.flag |= EVENT_FLAG_LAND;
-        }
-        if (in_umbra)
-        {
-            cevent.flag |= EVENT_FLAG_UMBRA;
-        }
-        if (in_gs)
-        {
-            cevent.flag |= EVENT_FLAG_GS;
-        }
-        if (in_targ)
-        {
-            cevent.flag |= EVENT_FLAG_TARG;
-        }
         cevent.pos = currentGeoidPos();
         currentinfo->event.push_back(cevent);
         ++iretn;
@@ -3253,22 +3222,6 @@ int32_t OrbitalEventGenerator::check_lat_event(bool force_end, float lat)
             cevent.utcexec = cevent.utc;
             cevent.dtime = 0.;
             cevent.flag = (2 * EVENT_SCALE_PRIORITY) | EVENT_FLAG_COLOR_CYAN;
-            if (in_land)
-            {
-                cevent.flag |= EVENT_FLAG_LAND;
-            }
-            if (in_umbra)
-            {
-                cevent.flag |= EVENT_FLAG_UMBRA;
-            }
-            if (in_gs)
-            {
-                cevent.flag |= EVENT_FLAG_GS;
-            }
-            if (in_targ)
-            {
-                cevent.flag |= EVENT_FLAG_TARG;
-            }
             cevent.pos = currentGeoidPos();
             currentinfo->event.push_back(cevent);
             ++iretn;
@@ -3293,22 +3246,6 @@ int32_t OrbitalEventGenerator::check_lat_event(bool force_end, float lat)
             cevent.utcexec = cevent.utc;
             cevent.dtime = 0.;
             cevent.flag = (2 * EVENT_SCALE_PRIORITY) | EVENT_FLAG_COLOR_CYAN;
-            if (in_land)
-            {
-                cevent.flag |= EVENT_FLAG_LAND;
-            }
-            if (in_umbra)
-            {
-                cevent.flag |= EVENT_FLAG_UMBRA;
-            }
-            if (in_gs)
-            {
-                cevent.flag |= EVENT_FLAG_GS;
-            }
-            if (in_targ)
-            {
-                cevent.flag |= EVENT_FLAG_TARG;
-            }
             cevent.pos = currentGeoidPos();
             currentinfo->event.push_back(cevent);
             ++iretn;
@@ -3333,22 +3270,7 @@ int32_t OrbitalEventGenerator::check_time_event(bool force_end)
         cevent.utc = time_end;
         cevent.utcexec = cevent.utc;
         cevent.dtime = currentinfo->event_tick;
-        if (in_land)
-        {
-            cevent.flag |= EVENT_FLAG_LAND;
-        }
-        if (in_umbra)
-        {
-            cevent.flag |= EVENT_FLAG_UMBRA;
-        }
-        if (in_gs)
-        {
-            cevent.flag |= EVENT_FLAG_GS;
-        }
-        if (in_targ)
-        {
-            cevent.flag |= EVENT_FLAG_TARG;
-        }
+        cevent.flag |= state_flags();
         time_start = cevent.utc;
         time_end = time_start + currentinfo->event_tick;
         cevent.pos = currentGeoidPos();
@@ -3393,22 +3315,7 @@ int32_t OrbitalEventGenerator::check_land_event(bool force_end)
         cevent.utcexec = cevent.utc;
         cevent.dtime = 0.;
         cevent.flag = (5 * EVENT_SCALE_PRIORITY) | EVENT_FLAG_PAIR | EVENT_FLAG_LAND;
-        if (in_land)
-        {
-            cevent.flag |= EVENT_FLAG_LAND;
-        }
-        if (in_umbra)
-        {
-            cevent.flag |= EVENT_FLAG_UMBRA;
-        }
-        if (in_gs)
-        {
-            cevent.flag |= EVENT_FLAG_GS;
-        }
-        if (in_targ)
-        {
-            cevent.flag |= EVENT_FLAG_TARG;
-        }
+        cevent.flag |= state_flags();
         cevent.pos = currentGeoidPos();
         currentinfo->event.push_back(cevent);
         land_start = cevent.utc;
@@ -3426,22 +3333,7 @@ int32_t OrbitalEventGenerator::check_land_event(bool force_end)
         cevent.utcexec = cevent.utc;
         cevent.dtime = cevent.utc - land_start;
         cevent.flag = (5 * EVENT_SCALE_PRIORITY) | EVENT_FLAG_PAIR | EVENT_FLAG_EXIT;
-        if (in_land)
-        {
-            cevent.flag |= EVENT_FLAG_LAND;
-        }
-        if (in_umbra)
-        {
-            cevent.flag |= EVENT_FLAG_UMBRA;
-        }
-        if (in_gs)
-        {
-            cevent.flag |= EVENT_FLAG_GS;
-        }
-        if (in_targ)
-        {
-            cevent.flag |= EVENT_FLAG_TARG;
-        }
+        cevent.flag |= state_flags();
         cevent.pos = currentGeoidPos();
         currentinfo->event.push_back(cevent);
         land_start = 0.;
@@ -3467,22 +3359,7 @@ int32_t OrbitalEventGenerator::check_umbra_event(bool force_end)
         cevent.utcexec = cevent.utc;
         cevent.dtime = 0.;
         cevent.flag = (2 * EVENT_SCALE_PRIORITY) | EVENT_FLAG_PAIR | EVENT_FLAG_COLOR_WHITE | EVENT_FLAG_UMBRA;
-        if (in_land)
-        {
-            cevent.flag |= EVENT_FLAG_LAND;
-        }
-        if (in_umbra)
-        {
-            cevent.flag |= EVENT_FLAG_UMBRA;
-        }
-        if (in_gs)
-        {
-            cevent.flag |= EVENT_FLAG_GS;
-        }
-        if (in_targ)
-        {
-            cevent.flag |= EVENT_FLAG_TARG;
-        }
+        cevent.flag |= state_flags();
         cevent.pos = currentGeoidPos();
         currentinfo->event.push_back(cevent);
         umbra_start = cevent.utc;
@@ -3500,22 +3377,7 @@ int32_t OrbitalEventGenerator::check_umbra_event(bool force_end)
         cevent.utcexec = cevent.utc;
         cevent.dtime = cevent.utc - umbra_start;
         cevent.flag = (2 * EVENT_SCALE_PRIORITY) | EVENT_FLAG_PAIR | EVENT_FLAG_COLOR_WHITE | EVENT_FLAG_EXIT;
-        if (in_land)
-        {
-            cevent.flag |= EVENT_FLAG_LAND;
-        }
-        if (in_umbra)
-        {
-            cevent.flag |= EVENT_FLAG_UMBRA;
-        }
-        if (in_gs)
-        {
-            cevent.flag |= EVENT_FLAG_GS;
-        }
-        if (in_targ)
-        {
-            cevent.flag |= EVENT_FLAG_TARG;
-        }
+        cevent.flag |= state_flags();
         cevent.pos = currentGeoidPos();
         currentinfo->event.push_back(cevent);
         umbra_start = 0.;
@@ -3525,6 +3387,23 @@ int32_t OrbitalEventGenerator::check_umbra_event(bool force_end)
     {
         return 0;
     }
+}
+
+/// Flags for the states the node is currently in, OR'd into the paired events that mark
+/// something with persistence (TIMEIN, LANDIN/OUT, UMBRAIN/OUT, MOONIN/OUT, AOS/LOS,
+/// TARGAOS/LOS). Single-shot events (LATA/LATD/LATMIN/LATMAX, TMAX, MAX_) mark an instant
+/// and do not carry it. Each state is set before its own start event is built and
+/// cleared before its own end event is built, so a start event carries its flag and an
+/// end event does not.
+uint32_t OrbitalEventGenerator::state_flags() const
+{
+    uint32_t flag = 0;
+    if (in_land)  flag |= EVENT_FLAG_LAND;
+    if (in_umbra) flag |= EVENT_FLAG_UMBRA;
+    if (in_gs)    flag |= EVENT_FLAG_GS;
+    if (in_targ)  flag |= EVENT_FLAG_TARG;
+    if (in_moon)  flag |= EVENT_FLAG_MOON;
+    return flag;
 }
 
 // Moon-blocks-Earth ("NoEarth"): MOONIN/MOONOUT pair, ported from src/core.
@@ -3553,12 +3432,8 @@ int32_t OrbitalEventGenerator::check_moon_event(bool force_end)
     cevent.utcexec = cevent.utc;
     cevent.dtime = starting ? 0. : cevent.utc - moon_start;
     cevent.flag = (2 * EVENT_SCALE_PRIORITY) | EVENT_FLAG_PAIR | EVENT_FLAG_COLOR_GRAY;
-    if (starting) cevent.flag |= EVENT_FLAG_MOON;
-    else          cevent.flag |= EVENT_FLAG_EXIT;
-    if (in_land)  cevent.flag |= EVENT_FLAG_LAND;
-    if (in_umbra) cevent.flag |= EVENT_FLAG_UMBRA;
-    if (in_gs)    cevent.flag |= EVENT_FLAG_GS;
-    if (in_targ)  cevent.flag |= EVENT_FLAG_TARG;
+    if (!starting) cevent.flag |= EVENT_FLAG_EXIT;
+    cevent.flag |= state_flags();
     cevent.pos = currentGeoidPos();
     currentinfo->event.push_back(cevent);
     moon_start = starting ? cevent.utc : 0.;
@@ -3621,22 +3496,7 @@ int32_t OrbitalEventGenerator::check_gs_event(const targetstruc& gs, bool force_
             {
                 gs_aos_event.flag = EVENT_FLAG_PAIR | EVENT_FLAG_GS | EVENT_FLAG_COLOR_GREEN | (4 * EVENT_SCALE_PRIORITY);
             }
-            if (in_land)
-            {
-                gs_aos_event.flag |= EVENT_FLAG_LAND;
-            }
-            if (in_umbra)
-            {
-                gs_aos_event.flag |= EVENT_FLAG_UMBRA;
-            }
-            if (in_gs)
-            {
-                gs_aos_event.flag |= EVENT_FLAG_GS;
-            }
-            if (in_targ)
-            {
-                gs_aos_event.flag |= EVENT_FLAG_TARG;
-            }
+            gs_aos_event.flag |= state_flags();
             gs_aos_event.pos = currentGeoidPos();
             currentinfo->event.push_back(gs_aos_event);
             gsAOS[i].first = gs_aos_event.utc;
@@ -3663,22 +3523,7 @@ int32_t OrbitalEventGenerator::check_gs_event(const targetstruc& gs, bool force_
             {
                 gs_aos_event.flag = EVENT_FLAG_PAIR | EVENT_FLAG_EXIT | EVENT_FLAG_COLOR_GREEN | (4 * EVENT_SCALE_PRIORITY);
             }
-            if (in_land)
-            {
-                gs_aos_event.flag |= EVENT_FLAG_LAND;
-            }
-            if (in_umbra)
-            {
-                gs_aos_event.flag |= EVENT_FLAG_UMBRA;
-            }
-            if (in_gs)
-            {
-                gs_aos_event.flag |= EVENT_FLAG_GS;
-            }
-            if (in_targ)
-            {
-                gs_aos_event.flag |= EVENT_FLAG_TARG;
-            }
+            gs_aos_event.flag |= state_flags();
             gs_aos_event.pos = currentGeoidPos();
             currentinfo->event.push_back(gs_aos_event);
             // Reset this AoS event
@@ -3709,22 +3554,6 @@ int32_t OrbitalEventGenerator::check_gs_event(const targetstruc& gs, bool force_
         gs_aos_event.az = gs.azto;
         gs_aos_event.el = gs.elto;
         gs_aos_event.flag = EVENT_FLAG_COLOR_GREEN;
-        if (in_land)
-        {
-            gs_aos_event.flag |= EVENT_FLAG_LAND;
-        }
-        if (in_umbra)
-        {
-            gs_aos_event.flag |= EVENT_FLAG_UMBRA;
-        }
-        if (in_gs)
-        {
-            gs_aos_event.flag |= EVENT_FLAG_GS;
-        }
-        if (in_targ)
-        {
-            gs_aos_event.flag |= EVENT_FLAG_TARG;
-        }
         gs_aos_event.pos = currentGeoidPos();
         currentinfo->event.push_back(gs_aos_event);
         // Reset this AoS event
@@ -3766,6 +3595,8 @@ int32_t OrbitalEventGenerator::check_target_event(const targetstruc& target, boo
             target_event.az = target_AoS[target.name].azto;
             target_event.el = target_AoS[target.name].elto;
             target_event.flag = EVENT_FLAG_PAIR | EVENT_FLAG_EXIT | EVENT_FLAG_COLOR_WHITE;
+            // Another target may still be in view; an exit doesn't claim TARG itself
+            target_event.flag |= state_flags() & ~EVENT_FLAG_TARG;
             target_event.pos = currentGeoidPos();
             currentinfo->event.push_back(target_event);
             // Reset this AoS event
@@ -3829,6 +3660,7 @@ int32_t OrbitalEventGenerator::check_target_event(const targetstruc& target, boo
         target_event.az = target_AoS[target.name].azto;
         target_event.el = target_AoS[target.name].elto;
         target_event.flag = EVENT_FLAG_PAIR | EVENT_FLAG_TARG | EVENT_FLAG_COLOR_WHITE;
+        target_event.flag |= state_flags();
         target_event.pos = currentGeoidPos();
         currentinfo->event.push_back(target_event);
         target_AoS[target.name].utc = currentutc;
