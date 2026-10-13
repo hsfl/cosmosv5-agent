@@ -364,6 +364,9 @@ int32_t Simulator::AddTarget(targetstruc& targ)
         {
             state->currentinfo.target.push_back(targ);
             ++state->currentinfo.target_cnt;
+#ifndef INFLIGHT_BUILD
+            state->currentinfo.add_target_names();
+#endif
         }
     }
     return targets.size();

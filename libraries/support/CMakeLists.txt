@@ -23,7 +23,8 @@ install(TARGETS CosmosCad DESTINATION lib)
 # Final executables must link CosmosConvert from simulator.
 add_library(CosmosNamespace STATIC
     jsondef.h jsondef.cpp
-    jsonlib.h jsonlib.cpp)
+    jsonlib.h jsonlib.cpp
+    equation.h equation.cpp)
 target_link_libraries(CosmosNamespace CosmosConvert CosmosCad CosmosJson CosmosString CosmosMath CosmosSupport ${COSMOS_LIBS})
 install(TARGETS CosmosNamespace DESTINATION lib)
 

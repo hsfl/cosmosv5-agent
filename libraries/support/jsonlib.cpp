@@ -7197,6 +7197,9 @@ int32_t json_clear_cosmosstruc(int32_t type, cosmosstruc *cinfo)
         break;
     case JSON_STRUCT_TARGET:
         cinfo->target.clear();
+#ifndef INFLIGHT_BUILD
+        cinfo->add_target_names();
+#endif
         break;
     case JSON_STRUCT_TLE:
         cinfo->tle.clear();
@@ -8160,6 +8163,9 @@ int32_t json_clone_node(cosmosstruc *source, cosmosstruc *destination)
     destination->target_idx = source->target_idx;
     destination->target.clear();
     destination->target = source->target;
+#ifndef INFLIGHT_BUILD
+    destination->add_target_names();
+#endif
     if (destination->target.size() != destination->target_cnt)
     {
         return (AGENT_ERROR_MEMORY);
@@ -13573,6 +13579,9 @@ int32_t load_target(cosmosstruc *cinfo)
         loc_update(&targ.loc);
         cinfo->target.push_back(targ);
     }
+#ifndef INFLIGHT_BUILD
+    cinfo->add_target_names();
+#endif
 
     return cinfo->target.size();
 }
