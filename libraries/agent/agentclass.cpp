@@ -378,6 +378,9 @@ Agent::Agent(string realm_name,
     add_request("test_channel", req_test_channel, "channel radio dest start step count bytes", "Run channel performance test");
     add_request("channel_enable", req_channel_enable, "channel state", "Set channel enabled state to the specified value");
     add_request("channel_touch", req_channel_touch, "channel [seconds]", "Reset channel age");
+    // Standard subsystem requests: nops here, overridden by the subsystem agent (and interpreted by the simulator)
+    add_request("request_adcs", req_adcs, "point topo|lvlh|geoc|selc|icrf qx qy qz qw", "Point the spacecraft: attitude quaternion in the given frame");
+    add_request("request_camera", req_camera, "snap frames rate inttime [tile]", "Take frames images (0 = continuous) at rate Hz with inttime seconds integration, saved tile frames (default 1000) per file");
     // Set up Full SOH string
     //            set_fullsohstring(json_list_of_fullsoh(cinfo));
 
@@ -5304,5 +5307,140 @@ double Agent::get_timeStart()
     return timeStart;
 }
 //! @}
+
+//! Parse request_adcs point
+//! Expected args:
+//! [0] request_adcs
+//! [1] point
+//! [2] frame: topo, lvlh, geoc, selc or icrf
+//! [3-6] quaternion qx qy qz qw
+//! \param request Request.
+//! \param frame Frame name.
+//! \param q Normalized quaternion.
+//! \return Zero or negative error.
+int32_t Agent::parse_adcs_point(const string &request, string &frame, quaternion &q)
+{
+    vector<string> args = string_split(request);
+    if (args.size() != 7 || args[1] != "point")
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    if (args[2] != "topo" && args[2] != "lvlh" && args[2] != "geoc" && args[2] != "selc" && args[2] != "icrf")
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    double value[4];
+    for (uint16_t i=0; i<4; ++i)
+    {
+        char *end;
+        value[i] = strtod(args[3+i].c_str(), &end);
+        if (end == args[3+i].c_str() || *end != 0)
+        {
+            return GENERAL_ERROR_ARGS;
+        }
+    }
+    double norm = sqrt(value[0]*value[0] + value[1]*value[1] + value[2]*value[2] + value[3]*value[3]);
+    if (!std::isfinite(norm) || norm == 0.)
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    frame = args[2];
+    q.d.x = value[0] / norm;
+    q.d.y = value[1] / norm;
+    q.d.z = value[2] / norm;
+    q.w = value[3] / norm;
+    return 0;
+}
+
+//! Parse request_camera snap
+//! Expected args:
+//! [0] request_camera
+//! [1] snap
+//! [2] frames: number of images, 0 for continuous
+//! [3] rate: images per second
+//! [4] inttime: integration time in seconds
+//! [5] tile: optional, frames per tile (one file), default 1000
+//! \param request Request.
+//! \param frames Number of images, 0 for continuous.
+//! \param rate Images per second.
+//! \param inttime Integration time in seconds.
+//! \param tile Frames per tile.
+//! \return Zero or negative error.
+int32_t Agent::parse_camera_snap(const string &request, uint32_t &frames, double &rate, double &inttime, uint32_t &tile)
+{
+    vector<string> args = string_split(request);
+    if ((args.size() != 5 && args.size() != 6) || args[1] != "snap")
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    char *end;
+    long value = strtol(args[2].c_str(), &end, 10);
+    if (end == args[2].c_str() || *end != 0 || value < 0)
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    frames = value;
+    rate = strtod(args[3].c_str(), &end);
+    if (end == args[3].c_str() || *end != 0 || !(rate > 0.))
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    inttime = strtod(args[4].c_str(), &end);
+    if (end == args[4].c_str() || *end != 0 || !(inttime > 0.))
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    tile = 1000;
+    if (args.size() == 6)
+    {
+        value = strtol(args[5].c_str(), &end, 10);
+        if (end == args[5].c_str() || *end != 0 || value < 1)
+        {
+            return GENERAL_ERROR_ARGS;
+        }
+        tile = value;
+    }
+    return 0;
+}
+
+//! Default request_adcs: validate and acknowledge. Overridden by the ADCS agent.
+//! \param request Request.
+//! \param response Any response.
+//! \param agent Pointer to Agent.
+//! \return Zero or negative error.
+int32_t Agent::req_adcs(string &request, string &response, Agent *agent)
+{
+    string frame;
+    quaternion q;
+    int32_t iretn = parse_adcs_point(request, frame, q);
+    if (iretn < 0)
+    {
+        response = "Usage: request_adcs point topo|lvlh|geoc|selc|icrf qx qy qz qw";
+        return iretn;
+    }
+    response = "nop: point " + frame + " " + std::to_string(q.d.x) + " " + std::to_string(q.d.y) + " " + std::to_string(q.d.z) + " " + std::to_string(q.w);
+    agent->debug_log.Printf("request_adcs %s\n", response.c_str());
+    return 0;
+}
+
+//! Default request_camera: validate and acknowledge. Overridden by the payload agent.
+//! \param request Request.
+//! \param response Any response.
+//! \param agent Pointer to Agent.
+//! \return Zero or negative error.
+int32_t Agent::req_camera(string &request, string &response, Agent *agent)
+{
+    uint32_t frames, tile;
+    double rate, inttime;
+    int32_t iretn = parse_camera_snap(request, frames, rate, inttime, tile);
+    if (iretn < 0)
+    {
+        response = "Usage: request_camera snap frames rate inttime [tile]";
+        return iretn;
+    }
+    response = "nop: snap " + std::to_string(frames) + " " + std::to_string(rate) + " " + std::to_string(inttime) + " " + std::to_string(tile);
+    agent->debug_log.Printf("request_camera %s\n", response.c_str());
+    return 0;
+}
 } // end of namespace Support
 } // end namespace Cosmos

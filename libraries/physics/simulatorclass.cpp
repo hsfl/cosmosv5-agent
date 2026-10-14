@@ -1550,6 +1550,10 @@ int32_t Simulator::Reset()
 {
     RunState = State::Paused;
     currentutc = initialutc;
+    // Queues are reloaded from their files on the next step
+    queues.clear();
+    attcommands.clear();
+    imaging.clear();
     for (auto &state : cnodes)
     {
         state->Reset(currentutc);
@@ -1672,12 +1676,209 @@ int32_t Simulator::Propagate(double nextutc, bool enablethrust, bool enabletorqu
         cnodes[i]->currentinfo.node.loc.pos.lvlh.a = -cnodes[i]->currentinfo.node.loc.pos.lvlh.a;
     }
 
+    // Command queues: run due Events against the propagated state
+    ParseCommands();
+
     // Attitude control: slerp each node toward its desired pointing direction.
     // Runs after position propagation so update_target() results are current.
     if (enabletorque)
         AttitudeStep();
 
     return iretn;
+}
+
+//! Load a node's command queue
+//! The queue is the one agent_exec saves with CommandQueue::save_commands(), by
+//! default <realm>/nodes/<node>/temp/exec/.queue. A missing file gives an empty queue.
+//! \param nodename Node name.
+//! \param filepath Queue file, or empty for the default.
+//! \return Number of commands in the queue, or negative error.
+int32_t Simulator::LoadQueue(string nodename, string filepath)
+{
+    auto &queue = queues[nodename];
+    queue.reset(new Support::CommandQueue);
+    if (filepath.empty())
+    {
+        string nodedir = get_nodedir(realmname, nodename);
+        if (nodedir.empty())
+        {
+            return 0;
+        }
+        filepath = nodedir + "/temp/exec/.queue";
+    }
+    size_t slash = filepath.find_last_of('/');
+    if (slash == string::npos)
+    {
+        return queue->restore_commands("", filepath);
+    }
+    return queue->restore_commands(filepath.substr(0, slash+1), filepath.substr(slash+1));
+}
+
+//! Run each node's due commands at the current simulated time
+//! Recognized requests are interpreted in-process: request_adcs point sets the
+//! requested attitude (loc_req.att) and request_camera snap is recorded. Every due
+//! Event is added to the node's event list.
+//! \return Number of Events run, or negative error.
+int32_t Simulator::ParseCommands()
+{
+    int32_t count = 0;
+    for (auto &state : cnodes)
+    {
+        string name = state->currentinfo.node.name;
+        if (queues.find(name) == queues.end())
+        {
+            LoadQueue(name);
+        }
+        // Sessions already running take their frames first
+        ImagingStep(*state);
+        auto &queue = queues[name];
+        if (!queue->get_command_size())
+        {
+            continue;
+        }
+        for (Event &cmd : queue->due_commands(&state->currentinfo, currentutc))
+        {
+            eventstruc cevent;
+            cevent.name = cmd.name;
+            cevent.type = cmd.type;
+            cevent.data = cmd.data;
+            cevent.condition = cmd.condition;
+            cevent.utc = currentutc;
+            cevent.utcexec = currentutc;
+            cevent.flag = cmd.flag;
+            if (cmd.type == EVENT_TYPE_REQUEST)
+            {
+                vector<string> args = string_split(cmd.data);
+                if (!args.empty() && args[0] == "request_adcs")
+                {
+                    string frame;
+                    quaternion q;
+                    if (Support::Agent::parse_adcs_point(cmd.data, frame, q) >= 0)
+                    {
+                        attcommands[name] = {frame, q};
+                    }
+                    else
+                    {
+                        cevent.flag = (cevent.flag & ~EVENT_FLAG_COLOR) | EVENT_FLAG_COLOR_RED;
+                    }
+                }
+                else if (!args.empty() && args[0] == "request_camera")
+                {
+                    uint32_t frames, tile;
+                    double rate, inttime;
+                    if (Support::Agent::parse_camera_snap(cmd.data, frames, rate, inttime, tile) >= 0)
+                    {
+                        // Reported by ImagingStep() when the session ends
+                        ImagingSession session;
+                        session.name = cmd.name;
+                        session.request = cmd.data;
+                        session.flag = cmd.flag;
+                        if (cmd.is_conditional())
+                        {
+                            session.condition.parse(cmd.condition);
+                        }
+                        session.frames = frames;
+                        session.tile = tile;
+                        session.period = 1. / (rate * 86400.);
+                        session.inttime = inttime;
+                        session.nextutc = currentutc;
+                        imaging[name].push_back(session);
+                        continue;
+                    }
+                    else
+                    {
+                        cevent.flag = (cevent.flag & ~EVENT_FLAG_COLOR) | EVENT_FLAG_COLOR_RED;
+                    }
+                }
+            }
+            state->currentinfo.event.push_back(cevent);
+            ++count;
+        }
+        // New sessions take their first frame now
+        ImagingStep(*state);
+    }
+    return count;
+}
+
+//! Take the frames each of a node's imaging sessions is allowed up to the current time
+//! Frames are due every period from the start of the session. A session ends when all
+//! frames are taken (never, for frames = 0: continuous), or when its condition is false
+//! (the condition is evaluated at the step, and is taken to hold for the whole step when
+//! true). Frames are grouped into tiles of up to session.tile frames; each tile is one
+//! file, reported by ImagingTile() when it fills or the session ends.
+void Simulator::ImagingStep(Physics::State &state)
+{
+    auto sessions = imaging.find(state.currentinfo.node.name);
+    if (sessions == imaging.end())
+    {
+        return;
+    }
+    for (auto session = sessions->second.begin(); session != sessions->second.end(); )
+    {
+        bool allowed = !session->condition.valid() || session->condition.evaluate(&state.currentinfo) != 0.;
+        if (allowed)
+        {
+            while ((!session->frames || session->taken < session->frames) && session->nextutc <= currentutc)
+            {
+                if (!session->tiletaken)
+                {
+                    session->firstutc = session->nextutc;
+                }
+                session->lastutc = session->nextutc;
+                ++session->tiletaken;
+                ++session->taken;
+                session->nextutc += session->period;
+                // Tile full: save it and restart the take
+                if (session->tiletaken == session->tile)
+                {
+                    ImagingTile(state, *session, false);
+                }
+            }
+        }
+        if (allowed && (!session->frames || session->taken < session->frames))
+        {
+            ++session;
+            continue;
+        }
+
+        // Session over: save the partial tile, or report a session that took nothing
+        bool shortened = session->frames && session->taken < session->frames;
+        if (session->tiletaken || !session->taken)
+        {
+            ImagingTile(state, *session, shortened);
+        }
+        session = sessions->second.erase(session);
+    }
+}
+
+//! Report the current tile of an imaging session as one event (one file) and start a new tile
+//! utc is the tile's first frame, dtime runs to the end of its last frame's integration,
+//! value is the number of frames. Red if the session ended short of its frames.
+void Simulator::ImagingTile(Physics::State &state, ImagingSession &session, bool shortened)
+{
+    eventstruc cevent;
+    cevent.name = session.name;
+    cevent.type = EVENT_TYPE_REQUEST;
+    cevent.data = session.request;
+    cevent.condition = session.condition.text();
+    cevent.flag = session.flag;
+    cevent.value = session.tiletaken;
+    if (session.tiletaken)
+    {
+        cevent.utc = session.firstutc;
+        cevent.dtime = 86400. * (session.lastutc - session.firstutc) + session.inttime;
+    }
+    else
+    {
+        cevent.utc = currentutc;
+    }
+    cevent.utcexec = cevent.utc;
+    if (shortened)
+    {
+        cevent.flag = (cevent.flag & ~EVENT_FLAG_COLOR) | EVENT_FLAG_COLOR_RED;
+    }
+    state.currentinfo.event.push_back(cevent);
+    session.tiletaken = 0;
 }
 
 int32_t Simulator::Propagate(vector<vector<cosmosstruc> > &results, uint32_t runcount)
@@ -2117,8 +2318,6 @@ void Simulator::slewBodyAxis(Physics::State &state,
                              double dt, double currentutc)
 {
     qatt &catt        = state.currentinfo.node.loc.att.icrf;
-    double maxtorque  = state.currentinfo.node.phys.maxtorque;
-    const Vector &moi = state.currentinfo.node.phys.moi;
 
     // Current direction of bodyAxis in ICRF frame.
     rvector curDir = transform_q(q_conjugate(catt.s), bodyAxis);
@@ -2128,19 +2327,7 @@ void Simulator::slewBodyAxis(Physics::State &state,
     double angle = std::acos(cosA);
     if (angle < 1e-9) return;
 
-    // Bang-bang slew time: t = 2*sqrt(angle * I_min / tau_max)
-    double stepAng;
-    if (maxtorque > 0.)
-    {
-        double I_min   = std::min({moi.x, moi.y, moi.z});
-        double t_slew  = 2.0 * std::sqrt(angle * I_min / maxtorque);
-        stepAng = angle * std::min(1.0, dt / std::max(t_slew, dt));
-    }
-    else
-    {
-        // No torque limit defined for the node: nominal 0.5 deg/s slew rate.
-        stepAng = std::min(angle, RADOF(0.5) * dt);
-    }
+    double stepAng = slewStepAngle(state, angle, dt);
 
     // Rotation axis in ICRF (cross of current to target direction).
     rvector axis = rv_normal(rv_cross(curDir, targetDirIcrf));
@@ -2155,13 +2342,116 @@ void Simulator::slewBodyAxis(Physics::State &state,
 
     // q_{ICRF→body}(new) = q_{ICRF→body}(old) * q_conjugate(step_q)
     // (step_q rotates body→ICRF, conjugate reverses it into the ICRF→body map)
-    catt.s   = q_mult(catt.s, q_conjugate(step_q));
+    setSlewedAttitude(state, q_mult(catt.s, q_conjugate(step_q)), currentutc);
+}
+
+//! Angle to slew this step toward a pointing error of angle
+//! Bang-bang slew time t = 2*sqrt(angle * I_min / tau_max), or a nominal 0.5 deg/s
+//! when the node has no torque limit.
+double Simulator::slewStepAngle(const Physics::State &state, double angle, double dt)
+{
+    double maxtorque  = state.currentinfo.node.phys.maxtorque;
+    const Vector &moi = state.currentinfo.node.phys.moi;
+    if (maxtorque > 0.)
+    {
+        double I_min   = std::min({moi.x, moi.y, moi.z});
+        double t_slew  = 2.0 * std::sqrt(angle * I_min / maxtorque);
+        return angle * std::min(1.0, dt / std::max(t_slew, dt));
+    }
+    return std::min(angle, RADOF(0.5) * dt);
+}
+
+//! Set the node's ICRF attitude and keep it across steps
+void Simulator::setSlewedAttitude(Physics::State &state, const quaternion &icrf, double currentutc)
+{
+    qatt &catt = state.currentinfo.node.loc.att.icrf;
+    catt.s   = icrf;
     catt.utc = currentutc;
     att_set_icrf(state.currentinfo.node.loc);
     // The LVLH attitude propagator rebuilds icrf from loc_req.att.lvlh every step,
     // so persist the slewed attitude there or it is overwritten next step.
     att_icrf2lvlh(state.currentinfo.node.loc);
     state.currentinfo.node.loc_req.att.lvlh.s = state.currentinfo.node.loc.att.lvlh.s;
+}
+
+//! Slew the whole attitude toward targetIcrf (slerp, same rate limit as slewBodyAxis)
+void Simulator::slewAttitude(Physics::State &state, const quaternion &targetIcrf, double dt, double currentutc)
+{
+    quaternion q0 = state.currentinfo.node.loc.att.icrf.s;
+    quaternion q1 = targetIcrf;
+    double cosHalf = q0.w*q1.w + q0.d.x*q1.d.x + q0.d.y*q1.d.y + q0.d.z*q1.d.z;
+    // q and -q are the same attitude: take the short way
+    if (cosHalf < 0.)
+    {
+        cosHalf = -cosHalf;
+        q1.w = -q1.w;
+        q1.d.x = -q1.d.x;
+        q1.d.y = -q1.d.y;
+        q1.d.z = -q1.d.z;
+    }
+    cosHalf = std::min(1.0, cosHalf);
+    double angle = 2. * std::acos(cosHalf);
+    if (angle < 1e-9) return;
+
+    double stepAng = slewStepAngle(state, angle, dt);
+    if (stepAng >= angle || angle < 1e-6)
+    {
+        setSlewedAttitude(state, q1, currentutc);
+        return;
+    }
+    double sinHalf = std::sin(angle / 2.);
+    double f  = stepAng / angle;
+    double s0 = std::sin((1. - f) * angle / 2.) / sinHalf;
+    double s1 = std::sin(f * angle / 2.) / sinHalf;
+    quaternion q;
+    q.w   = s0*q0.w   + s1*q1.w;
+    q.d.x = s0*q0.d.x + s1*q1.d.x;
+    q.d.y = s0*q0.d.y + s1*q1.d.y;
+    q.d.z = s0*q0.d.z + s1*q1.d.z;
+    normalize_q(&q);
+    setSlewedAttitude(state, q, currentutc);
+}
+
+//! ICRF attitude for a commanded attitude in another frame, at the node's current position
+//! \return Zero or negative error.
+int32_t Simulator::commandedAttitude(const locstruc &loc, const AttitudeCommand &command, double currentutc, quaternion &icrf)
+{
+    locstruc tloc = loc;
+    qatt catt;
+    catt.utc = currentutc;
+    catt.s = command.q;
+    int32_t iretn;
+    if (command.frame == "topo")
+    {
+        tloc.att.topo = catt;
+        iretn = att_set_topo(tloc);
+    }
+    else if (command.frame == "lvlh")
+    {
+        tloc.att.lvlh = catt;
+        iretn = att_set_lvlh(tloc);
+    }
+    else if (command.frame == "geoc")
+    {
+        tloc.att.geoc = catt;
+        iretn = att_set_geoc(tloc);
+    }
+    else if (command.frame == "selc")
+    {
+        tloc.att.selc = catt;
+        iretn = att_set_selc(tloc);
+    }
+    else
+    {
+        tloc.att.icrf = catt;
+        iretn = att_set_icrf(tloc);
+    }
+    if (iretn < 0)
+    {
+        return iretn;
+    }
+    icrf = tloc.att.icrf.s;
+    return 0;
 }
 
 // Per-step attitude control: for each node, determine desired pointing direction
@@ -2176,6 +2466,18 @@ void Simulator::AttitudeStep()
     {
         auto   &ci  = cnodes[ni]->currentinfo;
         auto   &loc = ci.node.loc;
+
+        // ── 0. Commanded pointing (request_adcs point) overrides everything ─
+        auto command = attcommands.find(ci.node.name);
+        if (command != attcommands.end())
+        {
+            quaternion target;
+            if (commandedAttitude(loc, command->second, currentutc, target) >= 0)
+            {
+                slewAttitude(*cnodes[ni], target, dt, currentutc);
+                continue;
+            }
+        }
 
         // ── 1. GS contact (type 1/2, highest priority) ───────────────────
         // elto = satellite elevation as seen from target (ground looking up).
