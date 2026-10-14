@@ -7768,7 +7768,10 @@ int32_t json_setup_node(string &node, const string &realm, cosmosstruc *cinfo)
 
     if (node.length() > COSMOS_MAX_NAME) { node = node.substr(0, COSMOS_MAX_NAME); }
 
-    string fname = get_nodedir(realm, node) + ".json";
+    // Not get_nodedir(realm, node) + ".json": get_nodedir() returns empty
+    // unless the <node>/ data folder already exists, which would miss a bare
+    // <node>.json and fall through to creating an empty node.
+    string fname = get_realmdir(realm) + "/nodes/" + node + ".json";
     struct stat fstat;
     if (stat(fname.c_str(), &fstat) != 0 || fstat.st_size == 0)
     {

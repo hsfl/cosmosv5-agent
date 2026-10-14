@@ -5005,8 +5005,8 @@ union as a ::devicestruc.
             Vector fpush; //!< External push force vector [N]
             Vector moi = Vector(1.,1.,1.); //!< Moment of inertia tensor diagonal (principal axes) [kg·m²]
             Vector com; //!< Center of mass in body frame [m]
-            double maxthrust; //!< Maximum available thrust [N]
-            double maxtorque; //!< Maximum available torque [N·m]
+            double maxthrust = 0.; //!< Maximum available thrust [N]
+            double maxtorque = 0.; //!< Maximum available torque [N·m]
 
             //! Vector of all structures in node.
             vector <strucstruc> strucs;

@@ -1925,7 +1925,10 @@ int32_t State::Init(string name, double idt, string stype, Propagator::Type ptyp
     {
         // Overlay may have brought its own temperature sensors
         if (currentinfo.device[i]->type == static_cast<uint16_t>(DeviceType::TSEN)) { continue; }
-        json_createpiece(&currentinfo, "tsen_" + currentinfo.pieces[currentinfo.device[i]->pidx].name, DeviceType::TSEN);
+        // ...including this device's own, e.g. from a previously saved full node
+        string tname = "tsen_" + currentinfo.pieces[currentinfo.device[i]->pidx].name;
+        if (json_findpiece(&currentinfo, tname) >= 0) { continue; }
+        json_createpiece(&currentinfo, tname, DeviceType::TSEN);
     }
 
     json_map_node(&currentinfo);
