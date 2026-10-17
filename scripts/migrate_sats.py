@@ -10,8 +10,9 @@ node file:
   * node file, no stype -> stype is added; everything else is left alone
   * node file with stype -> left alone (a differing sats.dat type is reported)
 
-sats.dat itself is never modified (its "type" is deprecated but still read as a
-fallback). Dry run by default.
+sats.dat itself is never modified; the Simulator no longer reads its "type"
+(it warns instead), so remove it once the node files are written. Only the
+realm's top-level sats*.dat are scanned. Dry run by default.
 
 usage: migrate_sats.py <realm_dir> [--write]
 """

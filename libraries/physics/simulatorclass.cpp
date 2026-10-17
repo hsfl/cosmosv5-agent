@@ -904,12 +904,13 @@ int32_t Simulator::ParseSatString(string args)
     locstruc satloc;
     string estring;
     json11::Json jargs = json11::Json::parse(args, estring);
+    // The structural type lives in the node file (<realm>/nodes/<name>.json
+    // "stype"); a leftover sats.dat "type" is ignored, loudly, rather than
+    // letting the node quietly fall back to the default body.
     if (!jargs["type"].is_null())
     {
-        ++argcount;
-        type = jargs["type"].string_value();
-        std::cerr << "Warning: sats.dat \"type\" is deprecated (node \"" << jargs["nodename"].string_value()
-                  << "\"): set node.stype in <realm>/nodes/<name>.json; the node file wins when both exist." << std::endl;
+        std::cerr << "Warning: sats.dat \"type\" is no longer read (node \"" << jargs["nodename"].string_value()
+                  << "\"): set \"stype\" in <realm>/nodes/<name>.json, e.g. with agent/scripts/migrate_sats.py." << std::endl;
     }
     if (!jargs["nodename"].is_null())
     {
