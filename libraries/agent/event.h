@@ -54,6 +54,7 @@
 
 #include "support/configCosmos.h"
 #include "support/jsonlib.h"
+#include "support/equation.h"
 //#include "support/jsonobject.h"
 #include "support/timelib.h"
 
@@ -87,8 +88,10 @@ namespace Cosmos
             uint32_t	flag;
             /** %Event data */
             string		data;
-            /** %Event condition */
+            /** %Event condition: an infix Namespace 2.0 equation (see support/equation.h) */
             string		condition;
+            /** \p condition, parsed on first use and whenever it changes */
+            Support::Equation	equation;
             /**	%Event run indicators */
             bool		already_ran;
             uint32_t true_count=0;
@@ -111,11 +114,12 @@ namespace Cosmos
     */
             void	set_command(string jstring);
 
-            ///	Sets Event::utcexec to current time
+            ///	Sets Event::utcexec to the execution time
             /**
         This function is called after event execution and updates the execution time.
+        \param	utc	Execution time (MJD); 0 means the current wall-clock time.
     */
-            void	set_utcexec()	{	utcexec = currentmjd(0.);	}
+            void	set_utcexec(double utc=0.)	{	utcexec = (utc == 0.) ? currentmjd(0.) : utc;	}
 
             ///	Sets Event::flag to indicate the event has actually executed (i.e. EVENT_FLAG_ACTUAL)
             /**
@@ -161,9 +165,11 @@ namespace Cosmos
 
             ///	Determines if it is time for the %Event to execute
             /**
+        \param	utc	Time to test against (MJD); 0 means the current wall-clock time.
+        A simulator passes its simulated time here.
         \return	True if %Event is ready to execute, otherwise false
     */
-            bool	is_ready()		{	return (mjd <= currentmjd(0.)); }
+            bool	is_ready(double utc=0.)	{	return (mjd <= ((utc == 0.) ? currentmjd(0.) : utc)); }
 
             ///	Determines if the %Event repeatable
             /**
@@ -208,8 +214,13 @@ namespace Cosmos
 
             string generator(eventstruc event);
 
-            // JIMNOTE: this function (condition_true)  needs a look at....
-            // OLDNOTE: seems to return nan from json_equation...  how to use?
+            /// Evaluates the condition against a node's state, with debounce
+            /**
+        \param	cinfo	State whose Namespace 2.0 names the condition reads
+        \return	True once the condition has been nonzero for the debounce count
+        (from EVENT_FLAG_PRIORITY) of consecutive calls. A condition that does not
+        parse, or reads a missing name, is false.
+    */
             bool condition_true(cosmosstruc *cinfo);
 
             ///	Extraction operator

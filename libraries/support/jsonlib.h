@@ -374,8 +374,9 @@ string json_node_payload_stype(const string &s);
 int32_t json_node_overlay(cosmosstruc *cinfo, const string &s);
 
 //! Target "shortcut": compact, hand-authorable form of one permanent physical
-//! target (an Earth or Moon surface point/area), and the element type of
-//! <realm>/targets.json. Angles are degrees, h is metres:
+//! target (an Earth or Moon surface point/area), the element type of
+//! <realm>/targets.json, and the jtype:"target" wire message ("jtype" is
+//! optional when loading). Angles are degrees, h is metres:
 //!   {"name":"Faustini","type":5,"body":"moon","lat":-87.2,"lon":85.0,"h":0,
 //!    "radius":2100,"minel":10}
 //! "body" is "earth" (default) or "moon" and selects the surface frame
@@ -387,6 +388,10 @@ int32_t json_node_overlay(cosmosstruc *cinfo, const string &s);
 json11::Json json_target_payload(const targetstruc &target);
 int32_t json_target_payload_load(targetstruc &target, const json11::Json &payload);
 int32_t json_targets_load(const string &fname, vector<targetstruc> &targets);
+//! Realm "shortcut": jtype:"realm" carries the realm description (as in
+//! <realm>/realm.json) and its permanent targets (as in <realm>/targets.json).
+json11::Json json_realm_payload(const cosmosstruc *cinfo);
+int32_t json_realm_payload_load(cosmosstruc *cinfo, const string &s);
 
 //! Ground stations are real nodes (NODE_TYPE_GROUNDSTATION files under
 //! <realm>/nodes/), not target rows. These two turn them into the runtime
@@ -395,6 +400,9 @@ int32_t json_targets_load(const string &fname, vector<targetstruc> &targets);
 //! logical nodes), and target_from_node() synthesizes one target from one.
 targetstruc target_from_node(const nodestruc &node);
 int32_t json_load_realm_groundstations(const string &realm, vector<nodestruc> &stations);
+//! Descriptions ("node" member only) of every node in <realm>/nodes/, for
+//! choosing nodes by name or type before loading them with json_setup_node().
+int32_t json_load_realm_nodes(const string &realm, vector<nodestruc> &nodes);
 
 void json_test(cosmosstruc *cinfo);
 

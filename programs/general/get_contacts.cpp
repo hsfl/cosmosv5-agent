@@ -111,45 +111,31 @@ int main(int argc, char *argv[])
 
     // Load Nodes
 
-    std::vector <string> nodes;
+    vector<nodestruc> nodes;
     int32_t iretn = 0;
-    iretn = data_list_nodes(nodes);
-    for (size_t i=0; i<nodes.size(); ++i)
+    json_load_realm_nodes(agent->cinfo->realm.name, nodes);
+    for (nodestruc &node : nodes)
     {
-        if (tracknames.size() == 0 || tracknames.find(nodes[i], 0) != string::npos)
+        if (node.type != NODE_TYPE_SATELLITE || (tracknames.size() != 0 && tracknames.find(node.name, 0) == string::npos))
         {
-            string path = data_base_path(nodes[i]) + "/node.ini";
-            FILE *fp = fopen(path.c_str(), "r");
-            if (fp != nullptr)
-            {
-                int32_t type;
-                fscanf(fp, "{\"node_type\":%d", &type);
-                fclose(fp);
-                switch (type)
-                {
-                case NODE_TYPE_SATELLITE:
-                    trackstruc ttrack;
-                    ttrack.name = nodes[i];
-                    cosmosstruc *cinfo = json_init(ttrack.name);
-                    iretn = json_setup_node(ttrack.name, cinfo->realm.name, cinfo);
-                    if (iretn == 0)
-                    {
-                        if (iretn == 0 && (currentmjd()-cinfo->node.loc.pos.eci.utc) < 10.)
-                        {
-                            // Valid node. Initialize tracking and push it to list
-                            ttrack.visible = false;
-                            ttrack.peaked = false;
-                            ttrack.target.type = cinfo->node.type;
-                            ttrack.target.loc = cinfo->node.loc;
-                            ttrack.target.utc = cinfo->node.loc.utc;
-                            ttrack.physics = cinfo->node.phys;
-                            track.push_back(ttrack);
-                            json_destroy(cinfo);
-                        }
-                    }
-                }
-            }
+            continue;
         }
+        trackstruc ttrack;
+        ttrack.name = node.name;
+        cosmosstruc *cinfo = json_init(ttrack.name);
+        iretn = json_setup_node(ttrack.name, agent->cinfo->realm.name, cinfo);
+        if (iretn == 0 && (currentmjd()-cinfo->node.loc.pos.eci.utc) < 10.)
+        {
+            // Valid node. Initialize tracking and push it to list
+            ttrack.visible = false;
+            ttrack.peaked = false;
+            ttrack.target.type = cinfo->node.type;
+            ttrack.target.loc = cinfo->node.loc;
+            ttrack.target.utc = cinfo->node.loc.utc;
+            ttrack.physics = cinfo->node.phys;
+            track.push_back(ttrack);
+        }
+        json_destroy(cinfo);
     }
 
     for (size_t i=0; i<track.size(); ++i)

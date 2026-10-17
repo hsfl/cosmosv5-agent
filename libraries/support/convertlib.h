@@ -284,6 +284,12 @@ namespace Cosmos {
         //! \param geoc Pointer to the location structure to be filled with the recovered inertial position (output).
         //! \return 0 on success, negative error code on failure.
         int32_t pos_lvlh2geoc(locstruc *base, locstruc *geoc);
+        //! \brief SELC counterparts of ::pos_geoc2lvlh / ::pos_lvlh2geoc, in base's selenocentric LVLH frame.
+        int32_t pos_selc2lvlh(locstruc *selc, locstruc *base);
+        int32_t pos_lvlh2selc(locstruc *base, locstruc *selc);
+        //! \brief Planet-centered LVLH pair: geoc or selc, chosen by base->pos.extra.closest.
+        int32_t pos_planec2lvlh(locstruc *point, locstruc *base);
+        int32_t pos_lvlh2planec(locstruc *base, locstruc *point);
 
         //! \brief Zero-initialize a locstruc so that propagation can detect updates (reference overload).
         //! \param loc Reference to the location structure to clear (output).
@@ -480,6 +486,12 @@ namespace Cosmos {
         //! \param geoc Reference to the location structure to be filled with the recovered inertial position (output).
         //! \return 0 on success, negative error code on failure.
         int32_t pos_lvlh2geoc(locstruc &base, locstruc &geoc);
+        //! \brief SELC counterparts of ::pos_geoc2lvlh / ::pos_lvlh2geoc, in base's selenocentric LVLH frame (reference overload).
+        int32_t pos_selc2lvlh(locstruc &selc, locstruc &base);
+        int32_t pos_lvlh2selc(locstruc &base, locstruc &selc);
+        //! \brief Planet-centered LVLH pair: geoc or selc, chosen by base.pos.extra.closest (reference overload).
+        int32_t pos_planec2lvlh(locstruc &point, locstruc &base);
+        int32_t pos_lvlh2planec(locstruc &base, locstruc &point);
 
         //! \brief Compute Keplerian orbital elements from an ECI Cartesian state vector.
         //! \param eci ECI position (m) and velocity (m/s) at a given epoch (input).

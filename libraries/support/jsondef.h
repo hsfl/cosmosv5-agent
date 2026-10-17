@@ -6576,10 +6576,17 @@ union as a ::devicestruc.
 
             /// Add default names for every accessible memory location within the COSMOS Data Structure (Cosmos::Support::cosmosstruc) to Namespace 2.0.
             /** Provide a default name for every accessible memory location within the COSMOS Data Structure (Cosmos::Support::cosmosstruc) for Namespace 2.0. Naming convention follows the exact representation of the object in code. E.g., default name for `equation[0].name` is `"equation[0].name"`.
+        Clears Namespace 2.0 first, so it is a complete resync (as run by json_updatecosmosstruc()).
+        When only part of the cosmosstruc changed, use a narrower refresh such as add_target_names().
         \param none
         \return n/a
     */
             void add_default_names();
+
+            /// Add (or refresh) Namespace 2.0 names for every target, by index and by name.
+            /** Call after the target vector changes; see cosmosstruc::add_target_names() in jsondef.cpp.
+    */
+            void add_target_names();
 
             /// Gets the name associated with the provided memory address in Namespace 2.0.
             /** Searches through Namespace 2.0 and returns the first name associated with the provided memory address.
@@ -6639,6 +6646,33 @@ union as a ::devicestruc.
                 name_map::const_iterator it = names.find(s);
                 if(it == names.end())	{	cerr<<"name <"<<s<<"> not found!"<<endl; return dummy;	}
                 return *get_pointer<T>(s);
+            }
+
+            /// Gets a numeric value from Namespace 2.0 as a double, whatever its stored type.
+            /** Unlike get_value(), a missing name is not an error to report: it returns NAN quietly,
+        as does a name whose type is not a numeric scalar (bool reads as 0 or 1).
+        \param	s	string representing name to search for
+        \return	the value as a double, or NAN.
+    */
+            double get_number(const string& s) const	{
+                name_map::const_iterator it = names.find(s);
+                type_map::const_iterator tt = types.find(s);
+                if (it == names.end() || tt == types.end() || it->second == nullptr) { return NAN; }
+                const void *p = it->second;
+                const string &t = tt->second;
+                if (t == "double")		{ return *static_cast<const double*>(p); }
+                if (t == "float")		{ return *static_cast<const float*>(p); }
+                if (t == "int" || t == "int32_t")	{ return *static_cast<const int32_t*>(p); }
+                if (t == "uint32_t")	{ return *static_cast<const uint32_t*>(p); }
+                if (t == "int16_t")		{ return *static_cast<const int16_t*>(p); }
+                if (t == "uint16_t")	{ return *static_cast<const uint16_t*>(p); }
+                if (t == "int8_t")		{ return *static_cast<const int8_t*>(p); }
+                if (t == "uint8_t")		{ return *static_cast<const uint8_t*>(p); }
+                if (t == "int64_t")		{ return static_cast<double>(*static_cast<const int64_t*>(p)); }
+                if (t == "uint64_t")	{ return static_cast<double>(*static_cast<const uint64_t*>(p)); }
+                if (t == "size_t")		{ return static_cast<double>(*static_cast<const size_t*>(p)); }
+                if (t == "bool")		{ return *static_cast<const bool*>(p) ? 1. : 0.; }
+                return NAN;
             }
 
             template<class T>

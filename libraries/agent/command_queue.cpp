@@ -60,9 +60,7 @@ namespace Cosmos
             int32_t iretn = 0;
             queue_changed = true;
 
-            // set time executed & actual flag
-            cmd.set_utcexec();
-            cmd.set_actual();
+            // utcexec and EVENT_FLAG_ACTUAL were set by due_commands()
 
             string outpath = data_type_path(node_name, "temp", "exec", logdate_exec, "out");
             string bufferout;
@@ -105,9 +103,7 @@ namespace Cosmos
         {
             queue_changed = true;
 
-            // set time executed & actual flag
-            cmd.set_utcexec();
-            cmd.set_actual();
+            // utcexec and EVENT_FLAG_ACTUAL were set by due_commands()
 
             string outpath = data_type_path(node_name, "temp", "exec", logdate_exec, "out");
             printf("CMD: running command [%s] in [%s]\n", cmd.get_data().c_str(), outpath.c_str());
@@ -123,124 +119,109 @@ namespace Cosmos
             return 0;
         }
 
+        //!	Traverse the entire queue of Events, and return those which qualify to run now.
+        /*!
+            See command_queue.h. Repeating conditional Events stay queued and are re-armed
+            when their condition goes false; all other qualifying Events are removed.
+
+            \param	cinfo	Node state the conditions are evaluated against
+            \param	utc	Time of evaluation (MJD); 0 means the current wall-clock time
+            \return	The Events to run, in queue order
+        */
+        vector<Event> CommandQueue::due_commands(cosmosstruc *cinfo, double utc)
+        {
+            vector<Event> due;
+            if (utc == 0.)
+            {
+                utc = currentmjd(0.);
+            }
+
+            for (std::list<Event>::iterator ii = commands.begin(); ii != commands.end(); )
+            {
+                if (!ii->is_ready(utc))
+                {
+                    ++ii;
+                    continue;
+                }
+
+                if (ii->is_conditional())
+                {
+                    if (!ii->condition_true(cinfo))
+                    {
+                        // Re-arm a repeating command once its condition goes false
+                        ii->set_alreadyrun(false);
+                        ++ii;
+                        continue;
+                    }
+                    if (ii->is_repeat() && ii->is_alreadyrun())
+                    {
+                        ++ii;
+                        continue;
+                    }
+                }
+
+                // A solo command waits for a pass in which nothing else has run
+                if (ii->is_solo() && !due.empty())
+                {
+                    ++ii;
+                    continue;
+                }
+
+                ii->set_utcexec(utc);
+                ii->set_actual();
+                queue_changed = true;
+                due.push_back(*ii);
+
+                bool solo = ii->is_solo();
+                if (ii->is_conditional() && ii->is_repeat())
+                {
+                    ii->set_alreadyrun(true);
+                    ++ii;
+                }
+                else
+                {
+                    ii = commands.erase(ii);
+                }
+
+                // ...and nothing else runs after it
+                if (solo)
+                {
+                    break;
+                }
+            }
+            return due;
+        }
+
         //!	Traverse the entire queue of Events, and run those which qualify.
         /*!
 
-        An %Event only qualifies to run if the current time is greater than or equal to
-        the execution time of the %Event.  Further, if the %Event is conditional, then the
-        %Event condition must be true.
+        Runs each %Event returned by due_commands(), as a command (task) or a request.
 
             \param	agent	Pointer to Agent object (for call to condition_true(..))
             \param	nodename	Name of the node
             \param	logdate_exec	Time of execution (for logging purposes)
+            \param	utc	Time of evaluation (MJD); 0 means the current wall-clock time
         */
-        int32_t CommandQueue::run_commands(Agent *agent, string node_name, double logdate_exec)
+        int32_t CommandQueue::run_commands(Agent *agent, string node_name, double logdate_exec, double utc)
         {
-            for(std::list<Event>::iterator ii = commands.begin(); ii != commands.end(); ++ii)
+            for (Event &cmd : due_commands(agent->cinfo, utc))
             {
-                // if command is not solo
-                if (!ii->is_solo() && !queue_blocked)
+                agent->cinfo->node.lastevent = cmd.name;
+                agent->cinfo->node.lasteventutc = cmd.utcexec;
+                if (cmd.type == EVENT_TYPE_COMMAND)
                 {
-                    if (ii->is_solo())
-                    {
-                        queue_blocked = true;
-                    }
-                    else
-                    {
-                        queue_blocked = false;
-                    }
-                    // if command is ready
-                    if (ii->is_ready())
-                    {
-                        // if command is conditional
-                        if (ii->is_conditional())
-                        {
-                            // if command condition is true
-                            if(ii->condition_true(agent->cinfo))
-                            {
-                                // if command is repeatable
-                                if(ii->is_repeat())
-                                {
-                                    // if command has not already run
-                                    //                                    if(!ii->already_ran)
-                                    if (!ii->is_alreadyrun())
-                                    {
-                                        //                                        strncpy(agent->cinfo->node.lastevent, ii->name.c_str(), COSMOS_MAX_NAME);
-                                        agent->cinfo->node.lastevent = ii->name;
-                                        agent->cinfo->node.lasteventutc = currentmjd();
-                                        if (ii->type == EVENT_TYPE_COMMAND)
-                                        {
-                                            run_command(agent, *ii, node_name, logdate_exec);
-                                            logdate_exec += 1./864000.;
-                                        }
-                                        else if (ii->type == EVENT_TYPE_REQUEST)
-                                        {
-                                            run_request(agent, *ii, node_name, logdate_exec);
-                                            logdate_exec += 1./864000.;
-                                        }
-                                        ii->set_alreadyrun(true);
-                                        events.push_back(*ii);
-                                        if (events.size() > 10)
-                                        {
-                                            events.pop_front();
-                                        }
-                                        //                                        ii->already_ran = true;
-                                        break;
-                                    }
-                                }
-                                // else command is non-repeatable
-                                else
-                                {
-                                    if (ii->type == EVENT_TYPE_COMMAND)
-                                    {
-                                        run_command(agent, *ii, node_name, logdate_exec);
-                                        logdate_exec += 1./864000.;
-                                    }
-                                    else if (ii->type == EVENT_TYPE_REQUEST)
-                                    {
-                                        run_request(agent, *ii, node_name, logdate_exec);
-                                        logdate_exec += 1./864000.;
-                                    }
-                                    events.push_back(*ii);
-                                    if (events.size() > 10)
-                                    {
-                                        events.pop_front();
-                                    }
-                                    commands.erase(ii--);
-                                    break;
-                                }
-                            }
-                            // else command condition is false
-                            else
-                            {
-                                ii->set_alreadyrun(false);
-                            }
-                        }
-                        // else command is non-conditional
-                        else
-                        {
-                            if (ii->type == EVENT_TYPE_COMMAND)
-                            {
-                                run_command(agent, *ii, node_name, logdate_exec);
-                                logdate_exec += 1./864000.;
-                            }
-                            else if (ii->type == EVENT_TYPE_REQUEST)
-                            {
-                                run_request(agent, *ii, node_name, logdate_exec);
-                                logdate_exec += 1./864000.;
-                            }
-                            events.push_back(*ii);
-                            if (events.size() > 10)
-                            {
-                                events.pop_front();
-                            }
-                            commands.erase(ii--);
-                        }
-                    }
+                    run_command(agent, cmd, node_name, logdate_exec);
+                    logdate_exec += 1./864000.;
                 }
-                else
+                else if (cmd.type == EVENT_TYPE_REQUEST)
                 {
-                    ;//cout<<"This command is *NOT* ready to run! ";
+                    run_request(agent, cmd, node_name, logdate_exec);
+                    logdate_exec += 1./864000.;
+                }
+                events.push_back(cmd);
+                if (events.size() > 10)
+                {
+                    events.pop_front();
                 }
             }
             return static_cast<int32_t>(commands.size());
@@ -392,13 +373,7 @@ namespace Cosmos
         int32_t CommandQueue::del_command(Event& c)
         {
             size_t prev_sz = commands.size();
-            for (std::list<Event>::iterator ii = commands.begin();
-                 ii != commands.end();
-                 ++ii) {
-                if (c == *ii) {
-                    commands.erase(ii--);
-                }
-            }
+            commands.remove_if([&c](const Event &e) { return c == e; });
 
             queue_changed = true;
             return static_cast<int32_t>(prev_sz - commands.size());
@@ -415,6 +390,10 @@ namespace Cosmos
         int32_t CommandQueue::del_command(int pos)
         {
             size_t prev_sz = commands.size();
+            if (pos < 0 || static_cast<size_t>(pos) >= prev_sz)
+            {
+                return 0;
+            }
             std::list<Event>::iterator b = commands.begin();
 
             std::advance(b, pos);

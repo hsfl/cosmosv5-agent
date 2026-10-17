@@ -1304,6 +1304,11 @@ namespace Cosmos
             static int32_t req_test_channel(string &, string &response, Agent *agent);
             static int32_t req_channel_enable(string &, string &response, Agent *agent);
             static int32_t req_channel_touch(string &, string &response, Agent *agent);
+            static int32_t req_adcs(string &, string &response, Agent *agent);
+            static int32_t req_camera(string &, string &response, Agent *agent);
+        public:
+            static int32_t parse_adcs_point(const string &request, string &frame, quaternion &q);
+            static int32_t parse_camera_snap(const string &request, uint32_t &frames, double &rate, double &inttime, uint32_t &tile);
         };
     } // end of namespace Support
 } // end of namespace Cosmos

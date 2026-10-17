@@ -14,7 +14,7 @@ install(TARGETS CosmosPhysics DESTINATION lib)
 
 # simulatorclass: full simulation environment (needs physicsclass, jsondef, convertlib)
 add_library(CosmosSimulator STATIC simulatorclass.cpp simulatorclass.h)
-target_link_libraries(CosmosSimulator CosmosPhysics CosmosConvert CosmosNamespace CosmosSupport ${COSMOS_LIBS})
+target_link_libraries(CosmosSimulator CosmosPhysics CosmosCommand CosmosConvert CosmosNamespace CosmosSupport ${COSMOS_LIBS})
 install(TARGETS CosmosSimulator DESTINATION lib)
 
 install(FILES ${INCLUDES} DESTINATION include/physics)

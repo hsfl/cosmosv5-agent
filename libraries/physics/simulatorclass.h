@@ -18,6 +18,8 @@
 #include "support/jsondef.h"
 #include "support/convertlib.h"
 #include "physics/physicsclass.h"
+#include "agent/command_queue.h"
+#include <memory>
 //#include "physics/controllib.h"
 
 #define SIMULATOR_PORT_OUT 10030
@@ -104,6 +106,8 @@ namespace Cosmos
             int32_t UpdatePush(string name, Vector fpush);
             int32_t UpdateThrust(string name, Vector thrust);
             int32_t UpdateTorque(string name, Vector torque);
+            int32_t LoadQueue(string nodename, string filepath="");
+            int32_t ParseCommands();
             double initialutc = 0.;
             double endutc = 0.;
             double currentutc = 0.;
@@ -112,6 +116,42 @@ namespace Cosmos
             StateList cnodes;
             map<string, camstruc> detectors;
             map<string, targetstruc> targets;
+            //! Per-node command queues, restored from <realm>/nodes/<node>/temp/exec/.queue
+            map<string, std::unique_ptr<Support::CommandQueue>> queues;
+
+            //! Commanded pointing from request_adcs point: attitude in a named frame
+            struct AttitudeCommand
+            {
+                string frame;
+                quaternion q;
+            };
+            //! Per-node commanded pointing; overrides the automatic pointing in AttitudeStep()
+            map<string, AttitudeCommand> attcommands;
+
+            //! An imaging session started by request_camera snap
+            //! Imaging is allowed when the session starts, after each frame it is disallowed
+            //! for one frame period, and it ends when all frames are taken or the
+            //! Event's condition goes false (which also re-arms the Event in its queue).
+            //! Frames are saved in tiles of up to tile frames, one file each; the take
+            //! restarts after each tile.
+            struct ImagingSession
+            {
+                string name;
+                string request;
+                uint32_t flag = 0;
+                Support::Equation condition;
+                uint32_t frames = 0;    //!< 0 = continuous
+                uint32_t taken = 0;
+                uint32_t tile = 1000;       //!< Frames per tile (one file)
+                uint32_t tiletaken = 0;     //!< Frames in the current tile
+                double period = 0.;
+                double inttime = 0.;
+                double firstutc = 0.;       //!< First frame of the current tile
+                double lastutc = 0.;        //!< Last frame of the current tile
+                double nextutc = 0.;
+            };
+            //! Per-node active imaging sessions
+            map<string, vector<ImagingSession>> imaging;
             string realmname="propagate";
             double dt;
             double dtj;
@@ -141,6 +181,14 @@ namespace Cosmos
                                      const rvector &bodyAxis,
                                      const rvector &targetDirIcrf,
                                      double dt, double currentutc);
+            static void slewAttitude(Physics::State &state,
+                                     const quaternion &targetIcrf,
+                                     double dt, double currentutc);
+            static double slewStepAngle(const Physics::State &state, double angle, double dt);
+            static void setSlewedAttitude(Physics::State &state, const quaternion &icrf, double currentutc);
+            static int32_t commandedAttitude(const locstruc &loc, const AttitudeCommand &command, double currentutc, quaternion &icrf);
+            void ImagingStep(Physics::State &state);
+            void ImagingTile(Physics::State &state, ImagingSession &session, bool shortened);
 
             State RunState = State::Halted;
             //    socket_channel data_channel;

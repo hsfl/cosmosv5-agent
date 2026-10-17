@@ -114,40 +114,29 @@ int main(int argc, char *argv[])
 
     // Load Nodes
 
-    std::vector <string> nodes;
+    vector<nodestruc> nodes;
     int32_t iretn = 0;
-    iretn = data_list_nodes(nodes);
-    for (size_t i=0; i<nodes.size(); ++i)
+    json_load_realm_nodes(agent->cinfo->realm.name, nodes);
+    for (nodestruc &node : nodes)
     {
-        if (tracknames.size() == 0 || tracknames.find(nodes[i], 0) != string::npos)
+        if (node.type != NODE_TYPE_SATELLITE || (tracknames.size() != 0 && tracknames.find(node.name, 0) == string::npos))
         {
-            string path = data_base_path(nodes[i]) + "/node.ini";
-            FILE *fp = fopen(path.c_str(), "r");
-            if (fp != nullptr)
+            continue;
+        }
+        string path = data_base_path(node.name) + "/state.tle";
+        trackstruc ttrack;
+        ttrack.name = node.name;
+        iretn = load_lines(path, ttrack.tles);
+        if (iretn >= 0 && ttrack.tles.size())
+        {
+            iretn = lines2eci(utcstart, ttrack.tles, ttrack.target.loc.pos.eci);
+            if (iretn >= 0)
             {
-                int32_t type;
-                fscanf(fp, "{\"node_type\":%d", &type);
-                fclose(fp);
-                switch (type)
-                {
-                case NODE_TYPE_SATELLITE:
-                    path = data_base_path(nodes[i]) + "/state.tle";
-                    trackstruc ttrack;
-                    ttrack.name = nodes[i];
-                    iretn = load_lines(path, ttrack.tles);
-                    if (iretn >= 0 && ttrack.tles.size())
-                    {
-                        iretn = lines2eci(utcstart, ttrack.tles, ttrack.target.loc.pos.eci);
-                        if (iretn >= 0)
-                        {
-                            // Valid node. Initialize tracking and push it to list
-                            ttrack.visible = false;
-                            ttrack.peaked = false;
-                            ttrack.target.type = type;
-                            track.push_back(ttrack);
-                        }
-                    }
-                }
+                // Valid node. Initialize tracking and push it to list
+                ttrack.visible = false;
+                ttrack.peaked = false;
+                ttrack.target.type = node.type;
+                track.push_back(ttrack);
             }
         }
     }

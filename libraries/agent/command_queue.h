@@ -182,18 +182,37 @@ namespace Cosmos
             */
 //            int32_t flush_commands();
 
+            //!	Traverse the entire queue of Events, and return those which qualify to run now.
+            /*!
+
+            An %Event only qualifies to run if \p utc is greater than or equal to
+            the execution time of the %Event.  Further, if the %Event is conditional, then the
+            %Event condition must be true. A repeating conditional %Event stays in the queue and
+            runs once each time its condition becomes true; every other %Event is removed once it
+            qualifies. A solo %Event runs alone: it waits for a pass in which nothing else has
+            qualified, and nothing else qualifies after it in that pass.
+
+            Each returned %Event has utcexec and EVENT_FLAG_ACTUAL set. Nothing is executed, so
+            this needs no Agent: the executive dispatches the result (run_commands()), and a
+            simulator can interpret it against simulated time instead.
+
+                \param	cinfo	Node state the conditions are evaluated against
+                \param	utc	Time of evaluation (MJD); 0 means the current wall-clock time
+                \return	The Events to run, in queue order
+            */
+            vector<Event> due_commands(cosmosstruc *cinfo, double utc=0.);
+
             //!	Traverse the entire queue of Events, and run those which qualify.
             /*!
 
-            An %Event only qualifies to run if the current time is greater than or equal to
-            the execution time of the %Event.  Further, if the %Event is conditional, then the
-            %Event condition must be true.
+            Runs each %Event returned by due_commands(), as a command (task) or a request.
 
                 \param	agent	Pointer to Agent object (for call to condition_true(..))
                 \param	nodename	Name of the node
                 \param	logdate_exec	Time of execution (for logging purposes)
+                \param	utc	Time of evaluation (MJD); 0 means the current wall-clock time
             */
-            int32_t run_commands(Agent *agent, string nodename, double logdate_exec);
+            int32_t run_commands(Agent *agent, string nodename, double logdate_exec, double utc=0.);
 
             //!	Remove **all** matching Event from the queue
             /*!
@@ -226,7 +245,7 @@ namespace Cosmos
             /*!
                 This function is called after new Events are loaded.
             */
-            void sort()	{ commands.sort([](Event & c1, Event & c2) { return c1.getTime() < c2.getTime(); });	}
+            void sort()	{ commands.sort([](Event & c1, Event & c2) { return c1.getUtc() < c2.getUtc(); });	}
             //!	Extraction operator
             /*!
                 \param	out	Reference to ostream

@@ -888,7 +888,8 @@ int32_t json_addpiece(cosmosstruc *cinfo, uint32_t struc_idx, DeviceType ctype, 
 
     if (ctype < DeviceType::COUNT)
     {
-        iretn = json_adddevice(cinfo, static_cast <uint16_t>(cinfo->pieces.size()) - 1, ctype);
+        // The piece is pushed below, so its index is the current size
+        iretn = json_adddevice(cinfo, static_cast <uint16_t>(cinfo->pieces.size()), ctype);
         if (iretn < 0)
         {
             return iretn;
@@ -956,7 +957,8 @@ int32_t json_addpiece(cosmosstruc *cinfo, string name, DeviceType ctype, double 
 
     if (ctype < DeviceType::COUNT)
     {
-        iretn = json_adddevice(cinfo, static_cast <uint16_t>(cinfo->pieces.size()) - 1, ctype);
+        // The piece is pushed below, so its index is the current size
+        iretn = json_adddevice(cinfo, static_cast <uint16_t>(cinfo->pieces.size()), ctype);
         if (iretn < 0)
         {
             return iretn;
@@ -7197,6 +7199,9 @@ int32_t json_clear_cosmosstruc(int32_t type, cosmosstruc *cinfo)
         break;
     case JSON_STRUCT_TARGET:
         cinfo->target.clear();
+#ifndef INFLIGHT_BUILD
+        cinfo->add_target_names();
+#endif
         break;
     case JSON_STRUCT_TLE:
         cinfo->tle.clear();
@@ -7814,12 +7819,13 @@ targetstruc target_from_node(const nodestruc &node)
     return target;
 }
 
-//! Collect the realm's ground station nodes from <realm>/nodes/*.json.
-//! Only the payload's "node" member is read (see json_node_payload()); nodes of
-//! any other type, including NODE_TYPE_MOC, are skipped.
-//! \param stations Ground station nodes are appended.
-//! \return Number appended, or negative error. A realm with no nodes directory has none.
-int32_t json_load_realm_groundstations(const string &realm, vector<nodestruc> &stations)
+//! Collect the descriptions of a realm's nodes from <realm>/nodes/*.json.
+//! Only each payload's "node" member is read (see json_node_payload()), which is
+//! enough to pick nodes by name or type before loading one fully with
+//! json_setup_node(). Files that don't parse as a node payload are skipped.
+//! \param nodes Nodes are appended, in directory order.
+//! \return Number appended. A realm with no nodes directory has none.
+int32_t json_load_realm_nodes(const string &realm, vector<nodestruc> &nodes)
 {
     string nodesdir = get_realmdir(realm) + "/nodes";
     DIR *dp = opendir(nodesdir.c_str());
@@ -7853,13 +7859,34 @@ int32_t json_load_realm_groundstations(const string &realm, vector<nodestruc> &s
 
         nodestruc node;
         node.from_json(payload["node"].dump());
+        if (node.name.empty())
+        {
+            node.name = fname.substr(0, fname.size()-5);
+        }
+        nodes.push_back(node);
+        ++count;
+    }
+    closedir(dp);
+    return count;
+}
+
+//! Collect the realm's ground station nodes from <realm>/nodes/*.json.
+//! Nodes of any other type, including NODE_TYPE_MOC, are skipped.
+//! \param stations Ground station nodes are appended.
+//! \return Number appended, or negative error. A realm with no nodes directory has none.
+int32_t json_load_realm_groundstations(const string &realm, vector<nodestruc> &stations)
+{
+    vector<nodestruc> nodes;
+    json_load_realm_nodes(realm, nodes);
+    int32_t count = 0;
+    for (const nodestruc &node : nodes)
+    {
         if (node.type == NODE_TYPE_GROUNDSTATION)
         {
             stations.push_back(node);
             ++count;
         }
     }
-    closedir(dp);
     return count;
 }
 
@@ -7870,6 +7897,7 @@ json11::Json json_target_payload(const targetstruc &target)
     bool moon = (target.loc.pos.extra.closest == COSMOS_MOON);
     const gvector &s = moon ? target.loc.pos.selg.s : target.loc.pos.geod.s;
     json11::Json::object payload = {
+        { "jtype", "target" },
         { "name", target.name },
         { "type", static_cast<double>(target.type) },
         { "body", moon ? "moon" : "earth" },
@@ -7992,6 +8020,63 @@ int32_t json_targets_load(const string &fname, vector<targetstruc> &targets)
         ++count;
     }
     return count;
+}
+
+//! Build the "realm" shortcut payload: the realm's own description (what
+//! <realm>/realm.json holds) plus its permanent physical targets (what
+//! <realm>/targets.json holds), for jtype:"realm" wire messages. Ground station
+//! targets are left out: they are synthesized from ground station nodes, which
+//! travel as their own jtype:"node" payloads.
+//! \param cinfo Realm to build the payload from.
+//! \return JSON object, already tagged {"jtype":"realm"}.
+json11::Json json_realm_payload(const cosmosstruc *cinfo)
+{
+    json11::Json::array targets;
+    for (const targetstruc &target : cinfo->target)
+    {
+        if (target.type != NODE_TYPE_GROUNDSTATION) { targets.push_back(json_target_payload(target)); }
+    }
+    return json11::Json::object {
+        { "jtype", "realm" },
+        { "realm", cinfo->realm },
+        { "targets", targets }
+    };
+}
+
+//! Parse a "realm" shortcut payload built by ::json_realm_payload.
+//! If the payload has "targets", they replace cinfo's permanent targets;
+//! ground station targets already present are kept.
+//! \param cinfo Updated in place with the payload's fields.
+//! \param s JSON string to parse.
+//! \return Zero if successful, negative error otherwise.
+int32_t json_realm_payload_load(cosmosstruc *cinfo, const string &s)
+{
+    string error;
+    json11::Json p = json11::Json::parse(s, error);
+    if (!error.empty())
+    {
+        return COSMOS_JSON_ERROR_JSTRING;
+    }
+    if (!p["realm"].is_null()) { cinfo->realm.from_json(p["realm"].dump()); }
+    if (p["targets"].is_array())
+    {
+        vector<targetstruc> targets;
+        for (auto &item : p["targets"].array_items())
+        {
+            targetstruc targ;
+            if (json_target_payload_load(targ, item) < 0)
+            {
+                return COSMOS_JSON_ERROR_JSTRING;
+            }
+            targets.push_back(targ);
+        }
+        for (const targetstruc &target : cinfo->target)
+        {
+            if (target.type == NODE_TYPE_GROUNDSTATION) { targets.push_back(target); }
+        }
+        cinfo->target = targets;
+    }
+    return 0;
 }
 
 //! Setup Realm-level information: <realm>/realm.json (name + node_ids) and
@@ -8163,6 +8248,9 @@ int32_t json_clone_node(cosmosstruc *source, cosmosstruc *destination)
     destination->target_idx = source->target_idx;
     destination->target.clear();
     destination->target = source->target;
+#ifndef INFLIGHT_BUILD
+    destination->add_target_names();
+#endif
     if (destination->target.size() != destination->target_cnt)
     {
         return (AGENT_ERROR_MEMORY);
@@ -13576,6 +13664,9 @@ int32_t load_target(cosmosstruc *cinfo)
         loc_update(&targ.loc);
         cinfo->target.push_back(targ);
     }
+#ifndef INFLIGHT_BUILD
+    cinfo->add_target_names();
+#endif
 
     return cinfo->target.size();
 }
