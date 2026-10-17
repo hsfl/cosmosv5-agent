@@ -1664,13 +1664,14 @@ int32_t Simulator::Propagate(double nextutc, bool enablethrust, bool enabletorqu
         }
     }
 
-    // Use a copy of the mother's locstruc so that pos_geoc2lvlh's internal
-    // pos_set_geoc() call (which wipes and recomputes the first argument) does
-    // not corrupt the GJ integrator's primary ECI state variable.
+    // Use a copy of the mother's locstruc so that pos_planec2lvlh's internal
+    // pos_set_geoc()/pos_set_selc() call (which wipes and recomputes the first
+    // argument) does not corrupt the GJ integrator's primary ECI state variable.
+    // LVLH is about the body each node is closest to (geoc, or selc at the Moon).
     locstruc mother_loc = cnodes[0]->currentinfo.node.loc;
     for (uint16_t i=1; i<cnodes.size(); ++i)
     {
-        pos_geoc2lvlh(mother_loc, cnodes[i]->currentinfo.node.loc);
+        pos_planec2lvlh(mother_loc, cnodes[i]->currentinfo.node.loc);
         cnodes[i]->currentinfo.node.loc.pos.lvlh.s = -cnodes[i]->currentinfo.node.loc.pos.lvlh.s;
         cnodes[i]->currentinfo.node.loc.pos.lvlh.v = -cnodes[i]->currentinfo.node.loc.pos.lvlh.v;
         cnodes[i]->currentinfo.node.loc.pos.lvlh.a = -cnodes[i]->currentinfo.node.loc.pos.lvlh.a;

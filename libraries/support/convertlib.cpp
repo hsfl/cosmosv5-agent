@@ -4053,14 +4053,44 @@ int32_t pos_lvlh2origin(locstruc& loc)
     return 0;
 }
 
+//! LVLH offset of point from base, in base's LVLH frame about the Earth
+//! (geoc, g2l) or the Moon (selc, s2l). Written to base.pos.lvlh.
+static int32_t pos_planec2lvlh(locstruc &point, locstruc &base, bool moon)
+{
+    int32_t (*set)(locstruc &) = moon ? static_cast<int32_t (*)(locstruc &)>(pos_set_selc) : static_cast<int32_t (*)(locstruc &)>(pos_set_geoc);
+    set(point);
+    set(base);
+    const cartpos &p = moon ? point.pos.selc : point.pos.geoc;
+    const cartpos &b = moon ? base.pos.selc : base.pos.geoc;
+    quaternion p2l = moon ? base.pos.extra.s2l : base.pos.extra.g2l;
+    base.pos.lvlh.s = irotate(p2l, rv_sub(p.s, b.s));
+    base.pos.lvlh.v = irotate(p2l, rv_sub(p.v, b.v));
+    base.pos.lvlh.a = irotate(p2l, rv_sub(p.a, b.a));
+    return 0;
+}
+
+//! Inverse of the above: point = base + base.pos.lvlh, rotated out of base's
+//! LVLH frame about the Earth (geoc) or the Moon (selc). base must be fully set.
+static int32_t pos_lvlh2planec(locstruc &base, locstruc &point, bool moon)
+{
+    cartpos &p = moon ? point.pos.selc : point.pos.geoc;
+    const cartpos &b = moon ? base.pos.selc : base.pos.geoc;
+    quaternion l2p = moon ? base.pos.extra.l2s : base.pos.extra.l2g;
+    p.utc = b.utc;
+    p.s = rv_add(b.s, irotate(l2p, base.pos.lvlh.s));
+    p.v = rv_add(b.v, irotate(l2p, base.pos.lvlh.v));
+    p.a = rv_add(b.a, irotate(l2p, base.pos.lvlh.a));
+    return moon ? pos_set_selc(point) : pos_set_geoc(point);
+}
+
 /**
-         * \brief Converts LVLH offset coordinates to base coordinates
+         * \brief Converts a GEOC based LVLH offset back to a GEOC position
          *
-         * Requires lvlh.pos to be fully set with current LVLH offset position.
-         * Requires geoc.pos to be fully set with current LVLH offset position.
+         * Inverse of ::pos_geoc2lvlh. Requires base to be fully set, with
+         * base.pos.lvlh holding the offset in base's geocentric LVLH frame.
          *
-         * \param loc ::locstruc containing Offset to convert to Origin
-         * \param lvlh ::cartpos LVLH offsets to apply
+         * \param base ::locstruc of the reference orbit, holding the offset
+         * \param geoc ::locstruc set to base plus the offset
          * \return int32_t 0 on success, negative on error
          */
 int32_t pos_lvlh2geoc(locstruc *base, locstruc *geoc)
@@ -4070,33 +4100,17 @@ int32_t pos_lvlh2geoc(locstruc *base, locstruc *geoc)
 
 int32_t pos_lvlh2geoc(locstruc &base, locstruc &geoc)
 {
-    pos_set_geoc(geoc);
-    pos_set_geoc(base);
-    cartpos geoc_offset;
-    geoc_offset.s = irotate(base.pos.extra.g2l, geoc_offset.s);
-    geoc_offset.v = irotate(base.pos.extra.g2l, geoc_offset.v);
-    geoc_offset.a = irotate(base.pos.extra.g2l, geoc_offset.a);
-    geoc_offset.s = rv_add(base.pos.geoc.s, geoc_offset.s);
-    geoc_offset.v = rv_add(base.pos.geoc.v, geoc_offset.v);
-    geoc_offset.a = rv_add(base.pos.geoc.a, geoc_offset.a);
-    geoc.pos.lvlh.s = rv_zero();
-    geoc.pos.lvlh.v = rv_zero();
-    geoc.pos.lvlh.a = rv_zero();
-
-    geoc.pos.geoc.pass = std::max(geoc.pos.eci.pass, geoc.pos.geos.pass) + 1;
-    pos_set_geoc(geoc);
-
-    return 0;
+    return pos_lvlh2planec(base, geoc, false);
 }
 
 /**
-         * \brief Converts GEOC based LVLH offset coordinates to base coordinates
+         * \brief Converts a GEOC position to an LVLH offset from a base orbit
          *
-         * Requires lvlh.pos to be fully set with current LVLH offset position.
-         * Requires geoc.pos to be fully set with current LVLH offset position.
+         * The offset of geoc from base, in base's geocentric LVLH frame, is
+         * written to base.pos.lvlh.
          *
-         * \param loc ::locstruc containing Offset to convert to Origin
-         * \param lvlh ::cartpos LVLH offsets to apply
+         * \param geoc ::locstruc of the offset point
+         * \param base ::locstruc of the reference orbit
          * \return int32_t 0 on success, negative on error
          */
 int32_t pos_geoc2lvlh(locstruc *geoc, locstruc *base)
@@ -4106,17 +4120,51 @@ int32_t pos_geoc2lvlh(locstruc *geoc, locstruc *base)
 
 int32_t pos_geoc2lvlh(locstruc &geoc, locstruc &base)
 {
-    pos_set_geoc(geoc);
-    pos_set_geoc(base);
-    cartpos geoc_offset;
-    geoc_offset.s = rv_sub(geoc.pos.geoc.s, base.pos.geoc.s);
-    geoc_offset.v = rv_sub(geoc.pos.geoc.v, base.pos.geoc.v);
-    geoc_offset.a = rv_sub(geoc.pos.geoc.a, base.pos.geoc.a);
-    base.pos.lvlh.s = irotate(base.pos.extra.g2l, geoc_offset.s);
-    base.pos.lvlh.v = irotate(base.pos.extra.g2l, geoc_offset.v);
-    base.pos.lvlh.a = irotate(base.pos.extra.g2l, geoc_offset.a);
+    return pos_planec2lvlh(geoc, base, false);
+}
 
-    return 0;
+//! SELC (Moon-centered, Moon-fixed) counterparts of ::pos_lvlh2geoc and
+//! ::pos_geoc2lvlh, using base's selenocentric LVLH frame.
+int32_t pos_lvlh2selc(locstruc *base, locstruc *selc)
+{
+    return pos_lvlh2selc(*base, *selc);
+}
+
+int32_t pos_lvlh2selc(locstruc &base, locstruc &selc)
+{
+    return pos_lvlh2planec(base, selc, true);
+}
+
+int32_t pos_selc2lvlh(locstruc *selc, locstruc *base)
+{
+    return pos_selc2lvlh(*selc, *base);
+}
+
+int32_t pos_selc2lvlh(locstruc &selc, locstruc &base)
+{
+    return pos_planec2lvlh(selc, base, true);
+}
+
+//! Planet-centered counterparts: geoc or selc, chosen by the body base is
+//! closest to (base.pos.extra.closest).
+int32_t pos_lvlh2planec(locstruc *base, locstruc *point)
+{
+    return pos_lvlh2planec(*base, *point);
+}
+
+int32_t pos_lvlh2planec(locstruc &base, locstruc &point)
+{
+    return pos_lvlh2planec(base, point, base.pos.extra.closest == COSMOS_MOON);
+}
+
+int32_t pos_planec2lvlh(locstruc *point, locstruc *base)
+{
+    return pos_planec2lvlh(*point, *base);
+}
+
+int32_t pos_planec2lvlh(locstruc &point, locstruc &base)
+{
+    return pos_planec2lvlh(point, base, base.pos.extra.closest == COSMOS_MOON);
 }
 
 // JIMNOTE: this function is wrong and should be removed
@@ -6319,7 +6367,7 @@ int stk2eci(double utc, stkstruc &stk, cartpos &eci)
 
 ::std::istream &operator>>(::std::istream &in, extrapos &a)
 {
-    in >> a.utc >> a.tt >> a.ut >> a.tdb >> a.j2e >> a.dj2e >> a.ddj2e >> a.e2j >> a.de2j >> a.dde2j >> a.j2t >> a.j2s >> a.t2j >> a.s2j >> a.s2t >> a.ds2t >> a.t2s >> a.dt2s >> a.e2l >> a.l2e >> a.g2l >> a.l2g >> a.l2s >> a.s2l >> a.sun2earth >> a.sun2moon >> a.closest;
+    in >> a.utc >> a.tt >> a.ut >> a.tdb >> a.j2e >> a.dj2e >> a.ddj2e >> a.e2j >> a.de2j >> a.dde2j >> a.j2t >> a.j2s >> a.t2j >> a.s2j >> a.s2t >> a.ds2t >> a.t2s >> a.dt2s >> a.l2e >> a.e2l >> a.l2g >> a.g2l >> a.l2s >> a.s2l >> a.sun2earth >> a.sun2moon >> a.closest;
     return in;
 }
 
