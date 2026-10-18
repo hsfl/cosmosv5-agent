@@ -4070,9 +4070,12 @@ static int32_t pos_planec2lvlh(locstruc &point, locstruc &base, bool moon)
 }
 
 //! Inverse of the above: point = base + base.pos.lvlh, rotated out of base's
-//! LVLH frame about the Earth (geoc) or the Moon (selc). base must be fully set.
+//! LVLH frame about the Earth (geoc) or the Moon (selc). base's geoc/selc must
+//! be current; its LVLH rotations are refreshed here, since a propagated
+//! state can carry stale ones.
 static int32_t pos_lvlh2planec(locstruc &base, locstruc &point, bool moon)
 {
+    pos_lvlh(base);
     cartpos &p = moon ? point.pos.selc : point.pos.geoc;
     const cartpos &b = moon ? base.pos.selc : base.pos.geoc;
     quaternion l2p = moon ? base.pos.extra.l2s : base.pos.extra.l2g;

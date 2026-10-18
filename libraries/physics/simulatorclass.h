@@ -173,6 +173,7 @@ namespace Cosmos
             // Formation and tracking plans
             string m_formationType;
             double m_formationSpacing = 0.;
+            vector<cartpos> m_holdOffset;    // "hold" formation: each child's LVLH offset from the mother
             int    m_trackingMode     = 0;   // 0=off, 1=nearest, 2=nearest unclaimed
 
             // Per-step attitude control (called from Propagate when enabletorque=true)

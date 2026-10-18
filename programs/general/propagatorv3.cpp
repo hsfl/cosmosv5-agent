@@ -36,7 +36,7 @@ double initialutc = 60107.01;
 bool initialutc_given = false;
 double endutc = 0.;
 double deltautc = 0.;
-string formation = "string";
+string formation = "hold";
 double spacing = 1000.;
 string realmname = "propagate";
 string orbitfile = "";
@@ -489,6 +489,8 @@ int main(int argc, char *argv[])
             printf("}\n");
         }
         sim->Propagate();
+        // Request the formation for the new time before thrusting toward it
+        sim->Formation(formation, spacing);
         sim->Thrust();
         if (pointingfile.length())
         {

@@ -2171,12 +2171,36 @@ int32_t Simulator::Formation(string type, double spacing)
     {
         return 0;
     }
+    else if (type == "hold")
+    {
+        // Hold each child at its offset from the mother when first seen
+        // (normally its sats.dat placement), kept in the mother's LVLH frame
+        // about the body she is closest to.
+        if (m_holdOffset.size() != cnodes.size())
+        {
+            m_holdOffset.resize(cnodes.size());
+            for (uint16_t i=1; i<cnodes.size(); ++i)
+            {
+                locstruc child = cnodes[i]->currentinfo.node.loc;
+                locstruc mother = cnodes[0]->currentinfo.node.loc;
+                pos_planec2lvlh(child, mother);
+                m_holdOffset[i] = mother.pos.lvlh;
+            }
+        }
+        for (uint16_t i=1; i<cnodes.size(); ++i)
+        {
+            locstruc mother = cnodes[0]->currentinfo.node.loc;
+            mother.pos.lvlh = m_holdOffset[i];
+            pos_lvlh2planec(mother, cnodes[i]->currentinfo.node.loc_req);
+        }
+        return 4;
+    }
     else if (type == "string")
     {
         for (uint16_t i=1; i<cnodes.size(); ++i)
         {
-            cnodes[i]->currentinfo.node.loc_req.pos.geoc.utc = cnodes[0]->currentinfo.node.loc.pos.geoc.utc;
-            cnodes[i]->currentinfo.node.loc_req.pos.geoc.s = cnodes[0]->currentinfo.node.loc.pos.geoc.s;
+            // The whole state: pos_origin2lvlh builds the LVLH axes from the velocity
+            cnodes[i]->currentinfo.node.loc_req.pos.geoc = cnodes[0]->currentinfo.node.loc.pos.geoc;
             cnodes[i]->currentinfo.node.loc_req.pos.lvlh.s = rv_zero();
             cnodes[i]->currentinfo.node.loc_req.pos.lvlh.s.col[1] = -spacing * i;
             ric2lvlh(length_rv(cnodes[i]->currentinfo.node.loc.pos.geoc.s), cnodes[i]->currentinfo.node.loc_req.pos.lvlh, cnodes[i]->currentinfo.node.loc_req.pos.lvlh);
@@ -2189,8 +2213,8 @@ int32_t Simulator::Formation(string type, double spacing)
     {
         for (uint16_t i=1; i<cnodes.size(); ++i)
         {
-            cnodes[i]->currentinfo.node.loc_req.pos.geoc.utc = cnodes[0]->currentinfo.node.loc.pos.geoc.utc;
-            cnodes[i]->currentinfo.node.loc_req.pos.geoc.s = cnodes[0]->currentinfo.node.loc.pos.geoc.s;
+            // The whole state: pos_origin2lvlh builds the LVLH axes from the velocity
+            cnodes[i]->currentinfo.node.loc_req.pos.geoc = cnodes[0]->currentinfo.node.loc.pos.geoc;
             cnodes[i]->currentinfo.node.loc_req.pos.lvlh.s = rv_zero();
             //            lvlh2ric(length_rv(cnodes[i]->currentinfo.node.loc.pos.geoc.s), cnodes[i]->currentinfo.node.loc_req.pos.lvlh, cnodes[i]->currentinfo.node.loc_req.pos.lvlh);
             if (i == 2)
@@ -2218,8 +2242,8 @@ int32_t Simulator::Formation(string type, double spacing)
     {
         for (uint16_t i=1; i<cnodes.size(); ++i)
         {
-            cnodes[i]->currentinfo.node.loc_req.pos.geoc.utc = cnodes[0]->currentinfo.node.loc.pos.geoc.utc;
-            cnodes[i]->currentinfo.node.loc_req.pos.geoc.s = cnodes[0]->currentinfo.node.loc.pos.geoc.s;
+            // The whole state: pos_origin2lvlh builds the LVLH axes from the velocity
+            cnodes[i]->currentinfo.node.loc_req.pos.geoc = cnodes[0]->currentinfo.node.loc.pos.geoc;
             cnodes[i]->currentinfo.node.loc_req.pos.lvlh.s = rv_zero();
             cnodes[i]->currentinfo.node.loc_req.pos.lvlh.s.col[1] = -spacing * i;
             //            lvlh2ric(length_rv(cnodes[i]->currentinfo.node.loc.pos.geoc.s), cnodes[i]->currentinfo.node.loc_req.pos.lvlh, cnodes[i]->currentinfo.node.loc_req.pos.lvlh);
