@@ -102,7 +102,6 @@ namespace Cosmos
             StateList GetNodes();
             int32_t NudgeNode(string name, cartpos pos=cartpos(), qatt att=qatt());
             void    SetFormation(string type, double spacing);
-            void    SetTracking(int mode);
             int32_t UpdatePush(string name, Vector fpush);
             int32_t UpdateThrust(string name, Vector thrust);
             int32_t UpdateTorque(string name, Vector torque);
@@ -119,13 +118,11 @@ namespace Cosmos
             //! Per-node command queues, restored from <realm>/nodes/<node>/temp/exec/.queue
             map<string, std::unique_ptr<Support::CommandQueue>> queues;
 
-            //! Commanded pointing from request_adcs point: attitude in a named frame
-            struct AttitudeCommand
-            {
-                string frame;
-                quaternion q;
-            };
-            //! Per-node commanded pointing; overrides the automatic pointing in AttitudeStep()
+            //! Commanded pointing from request_adcs point: an attitude in a named
+            //! frame, or a body axis aimed at the Sun, Earth, nadir, velocity, a
+            //! target or a station (recomputed every step)
+            using AttitudeCommand = Support::Agent::AdcsPoint;
+            //! Per-node commanded pointing, applied by AttitudeStep()
             map<string, AttitudeCommand> attcommands;
 
             //! An imaging session started by request_camera snap
@@ -170,24 +167,20 @@ namespace Cosmos
             bool server;
             int32_t error;
 
-            // Formation and tracking plans
+            // Formation plan
             string m_formationType;
             double m_formationSpacing = 0.;
             vector<cartpos> m_holdOffset;    // "hold" formation: each child's LVLH offset from the mother
-            int    m_trackingMode     = 0;   // 0=off, 1=nearest, 2=nearest unclaimed
 
             // Per-step attitude control (called from Propagate when enabletorque=true)
             void AttitudeStep();
-            static void slewBodyAxis(Physics::State &state,
-                                     const rvector &bodyAxis,
-                                     const rvector &targetDirIcrf,
-                                     double dt, double currentutc);
             static void slewAttitude(Physics::State &state,
                                      const quaternion &targetIcrf,
                                      double dt, double currentutc);
             static double slewStepAngle(const Physics::State &state, double angle, double dt);
             static void setSlewedAttitude(Physics::State &state, const quaternion &icrf, double currentutc);
-            static int32_t commandedAttitude(const locstruc &loc, const AttitudeCommand &command, double currentutc, quaternion &icrf);
+            static int32_t commandedAttitude(const cosmosstruc &info, const AttitudeCommand &command, double currentutc, quaternion &icrf);
+            static int32_t aimDirection(const cosmosstruc &info, const Support::Agent::AdcsAim &aim, rvector &dir);
             void ImagingStep(Physics::State &state);
             void ImagingTile(Physics::State &state, ImagingSession &session, bool shortened);
 

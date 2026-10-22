@@ -1753,15 +1753,26 @@ int32_t Simulator::ParseCommands()
                 vector<string> args = string_split(cmd.data);
                 if (!args.empty() && args[0] == "request_adcs")
                 {
-                    string frame;
-                    quaternion q;
-                    if (Support::Agent::parse_adcs_point(cmd.data, frame, q) >= 0)
+                    AttitudeCommand point;
+                    rvector dir;
+                    if (Support::Agent::parse_adcs_point(cmd.data, point) < 0)
                     {
-                        attcommands[name] = {frame, q};
+                        cevent.flag = (cevent.flag & ~EVENT_FLAG_COLOR) | EVENT_FLAG_COLOR_RED;
+                    }
+                    else if (point.mode == "hold")
+                    {
+                        attcommands.erase(name);
+                    }
+                    // A named target or station must exist (nearest may have none in view yet)
+                    else if (point.mode == "aim"
+                             && ((point.aim.name.size() && point.aim.name != "nearest" && aimDirection(state->currentinfo, point.aim, dir) < 0)
+                                 || (point.align.name.size() && point.align.name != "nearest" && aimDirection(state->currentinfo, point.align, dir) < 0)))
+                    {
+                        cevent.flag = (cevent.flag & ~EVENT_FLAG_COLOR) | EVENT_FLAG_COLOR_RED;
                     }
                     else
                     {
-                        cevent.flag = (cevent.flag & ~EVENT_FLAG_COLOR) | EVENT_FLAG_COLOR_RED;
+                        attcommands[name] = point;
                     }
                 }
                 else if (!args.empty() && args[0] == "request_camera")
@@ -2331,46 +2342,6 @@ void Simulator::SetFormation(string type, double spacing)
     m_formationSpacing = spacing;
 }
 
-void Simulator::SetTracking(int mode)
-{
-    m_trackingMode = mode;
-}
-
-// Slerp `state`'s att.icrf so that `bodyAxis` (body frame, unit vector) points at
-// `targetDirIcrf` (ICRF, unit vector). Advances by one bang-bang time-step fraction.
-void Simulator::slewBodyAxis(Physics::State &state,
-                             const rvector  &bodyAxis,
-                             const rvector  &targetDirIcrf,
-                             double dt, double currentutc)
-{
-    qatt &catt        = state.currentinfo.node.loc.att.icrf;
-
-    // Current direction of bodyAxis in ICRF frame.
-    rvector curDir = transform_q(q_conjugate(catt.s), bodyAxis);
-
-    double cosA = dot_rv(curDir, targetDirIcrf);
-    cosA = std::max(-1.0, std::min(1.0, cosA));
-    double angle = std::acos(cosA);
-    if (angle < 1e-9) return;
-
-    double stepAng = slewStepAngle(state, angle, dt);
-
-    // Rotation axis in ICRF (cross of current to target direction).
-    rvector axis = rv_normal(rv_cross(curDir, targetDirIcrf));
-
-    // Step rotation quaternion (in ICRF).
-    quaternion step_q;
-    double sha = std::sin(stepAng / 2.);
-    step_q.d.x = axis.col[0] * sha;
-    step_q.d.y = axis.col[1] * sha;
-    step_q.d.z = axis.col[2] * sha;
-    step_q.w = std::cos(stepAng / 2.);
-
-    // q_{ICRF→body}(new) = q_{ICRF→body}(old) * q_conjugate(step_q)
-    // (step_q rotates body→ICRF, conjugate reverses it into the ICRF→body map)
-    setSlewedAttitude(state, q_mult(catt.s, q_conjugate(step_q)), currentutc);
-}
-
 //! Angle to slew this step toward a pointing error of angle
 //! Bang-bang slew time t = 2*sqrt(angle * I_min / tau_max), or a nominal 0.5 deg/s
 //! when the node has no torque limit.
@@ -2400,7 +2371,7 @@ void Simulator::setSlewedAttitude(Physics::State &state, const quaternion &icrf,
     state.currentinfo.node.loc_req.att.lvlh.s = state.currentinfo.node.loc.att.lvlh.s;
 }
 
-//! Slew the whole attitude toward targetIcrf (slerp, same rate limit as slewBodyAxis)
+//! Slew the whole attitude toward targetIcrf (slerp at the slewStepAngle rate limit)
 void Simulator::slewAttitude(Physics::State &state, const quaternion &targetIcrf, double dt, double currentutc)
 {
     quaternion q0 = state.currentinfo.node.loc.att.icrf.s;
@@ -2438,11 +2409,124 @@ void Simulator::slewAttitude(Physics::State &state, const quaternion &targetIcrf
     setSlewedAttitude(state, q, currentutc);
 }
 
-//! ICRF attitude for a commanded attitude in another frame, at the node's current position
-//! \return Zero or negative error.
-int32_t Simulator::commandedAttitude(const locstruc &loc, const AttitudeCommand &command, double currentutc, quaternion &icrf)
+//! Unit ICRF direction from the node for one aim of request_adcs point
+//! target and station come from the node's target list (as update_target() left
+//! it); nearest is the closest one whose zenith angle, seen from it, is within
+//! the limit, and for a station whose link is not blocked by the Moon.
+//! \return Zero, or negative if there is no such direction.
+int32_t Simulator::aimDirection(const cosmosstruc &info, const Support::Agent::AdcsAim &aim, rvector &dir)
 {
-    locstruc tloc = loc;
+    const locstruc &loc = info.node.loc;
+    bool lunar = (loc.pos.extra.closest == COSMOS_MOON);
+    if (aim.mode == "sun")
+    {
+        dir = rv_sub(rv_smult(-1., loc.pos.extra.sun2earth.s), loc.pos.eci.s);
+    }
+    else if (aim.mode == "earth")
+    {
+        dir = rv_smult(-1., loc.pos.eci.s);
+    }
+    else if (aim.mode == "nadir")
+    {
+        dir = rv_smult(-1., lunar ? loc.pos.sci.s : loc.pos.eci.s);
+    }
+    else if (aim.mode == "velocity")
+    {
+        dir = lunar ? loc.pos.sci.v : loc.pos.eci.v;
+    }
+    else if (aim.mode == "target" || aim.mode == "station")
+    {
+        const targetstruc *best = nullptr;
+        double bestrange = 0.;
+        for (const targetstruc &t : info.target)
+        {
+            if (aim.mode == "target" ? t.type != NODE_TYPE_TARGET : (t.type != NODE_TYPE_GROUNDSTATION && t.type != NODE_TYPE_MOC))
+            {
+                continue;
+            }
+            if (aim.name == "nearest")
+            {
+                if (DPI2 - t.elto > aim.zenith || (aim.mode == "station" && !Physics::comm_link_clear(loc, t)))
+                {
+                    continue;
+                }
+            }
+            else if (t.name != aim.name)
+            {
+                continue;
+            }
+            double range = length_rv(rv_sub(t.loc.pos.eci.s, loc.pos.eci.s));
+            if (best == nullptr || range < bestrange)
+            {
+                best = &t;
+                bestrange = range;
+            }
+        }
+        if (best == nullptr)
+        {
+            return GENERAL_ERROR_ARGS;
+        }
+        dir = rv_sub(best->loc.pos.eci.s, loc.pos.eci.s);
+    }
+    else
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    if (length_rv(dir) < 1e-9)
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    dir = rv_normal(dir);
+    return 0;
+}
+
+//! ICRF attitude for a commanded pointing, at the node's current position
+//! An aim with no usable align keeps the roll about the aimed axis: another body
+//! axis is brought as close as it can be to where it points now.
+//! \return Zero, or negative if there is nothing to point at (the node holds).
+int32_t Simulator::commandedAttitude(const cosmosstruc &info, const AttitudeCommand &command, double currentutc, quaternion &icrf)
+{
+    if (command.mode == "aim")
+    {
+        rvector d1;
+        int32_t iretn = aimDirection(info, command.aim, d1);
+        if (iretn < 0)
+        {
+            return iretn;
+        }
+        rvector b1 = rv_normal(command.aim.axis);
+        rvector b2, d2;
+        bool aligned = false;
+        if (!command.align.mode.empty() && aimDirection(info, command.align, d2) >= 0 && fabs(dot_rv(d1, d2)) < .999)
+        {
+            b2 = rv_normal(command.align.axis);
+            aligned = true;
+        }
+        for (const rvector &axis : {rv_unitx(), rv_unity(), rv_unitz()})
+        {
+            if (aligned)
+            {
+                break;
+            }
+            d2 = transform_q(q_conjugate(info.node.loc.att.icrf.s), axis);
+            if (fabs(dot_rv(axis, b1)) < .9 && fabs(dot_rv(d2, d1)) < .999)
+            {
+                b2 = axis;
+                aligned = true;
+            }
+        }
+        // Body and ICRF triads. q_dcm2quaternion_rm() of W * B^T (body to ICRF)
+        // gives the quaternion with transform_q(icrf, d1) = b1.
+        rvector t2 = rv_normal(rv_cross(b1, b2));
+        rvector w2 = rv_normal(rv_cross(d1, d2));
+        rmatrix bt(b1, t2, rv_cross(b1, t2));
+        rmatrix wt(d1, w2, rv_cross(d1, w2));
+        icrf = q_dcm2quaternion_rm(rm_mmult(rm_transpose(wt), bt));
+        normalize_q(&icrf);
+        return 0;
+    }
+
+    locstruc tloc = info.node.loc;
     qatt catt;
     catt.utc = currentutc;
     catt.s = command.q;
@@ -2480,94 +2564,24 @@ int32_t Simulator::commandedAttitude(const locstruc &loc, const AttitudeCommand 
     return 0;
 }
 
-// Per-step attitude control: for each node, determine desired pointing direction
-// and slerp att.icrf toward it using bang-bang rate. Called from Propagate() when
-// enabletorque is true.
+// Per-step attitude control: slew each node toward its commanded attitude
+// (request_adcs point) using the bang-bang rate limit. There is no automatic
+// pointing: a node with no command holds its attitude. Called from Propagate()
+// when enabletorque is true.
 void Simulator::AttitudeStep()
 {
-    // For mode 2 (nearest unclaimed), reset claims each step.
-    std::set<int> claimed;
-
-    for (int ni = 0; ni < (int)cnodes.size(); ++ni)
+    for (auto &state : cnodes)
     {
-        auto   &ci  = cnodes[ni]->currentinfo;
-        auto   &loc = ci.node.loc;
-
-        // ── 0. Commanded pointing (request_adcs point) overrides everything ─
-        auto command = attcommands.find(ci.node.name);
-        if (command != attcommands.end())
+        auto command = attcommands.find(state->currentinfo.node.name);
+        if (command == attcommands.end())
         {
-            quaternion target;
-            if (commandedAttitude(loc, command->second, currentutc, target) >= 0)
-            {
-                slewAttitude(*cnodes[ni], target, dt, currentutc);
-                continue;
-            }
-        }
-
-        // ── 1. GS contact (type 1/2, highest priority) ───────────────────
-        // elto = satellite elevation as seen from target (ground looking up).
-        // elfrom is always negative for Earth-surface targets; use elto instead.
-        int   bestGS = -1;
-        float bestEl = 0.f;
-        for (int ti = 0; ti < (int)ci.target.size(); ++ti)
-        {
-            const auto &t = ci.target[ti];
-            if (t.type != 1 && t.type != 2) continue;
-            if (comm_link_clear(loc, t) && t.elto > bestEl) { bestGS = ti; bestEl = t.elto; }
-        }
-
-        if (bestGS >= 0)
-        {
-            rvector tdir = rv_normal(rv_sub(ci.target[bestGS].loc.pos.eci.s, loc.pos.eci.s));
-            // Antenna axis: body -Y (a guess until the real antenna location is known)
-            slewBodyAxis(*cnodes[ni], rv_smult(-1., rv_unity()), tdir, dt, currentutc);
             continue;
         }
-
-        // ── 2. Imaging target (type 5, tracking mode 1 or 2) ─────────────
-        if (m_trackingMode > 0)
+        quaternion target;
+        if (commandedAttitude(state->currentinfo, command->second, currentutc, target) >= 0)
         {
-            int   bestTgt = -1;
-            float bestTEl = 0.f;
-            for (int ti = 0; ti < (int)ci.target.size(); ++ti)
-            {
-                const auto &t = ci.target[ti];
-                if (t.type != 5) continue;
-                if (t.elto <= 0.f) continue;          // satellite below horizon
-                if (m_trackingMode == 2 && claimed.count(ti)) continue;
-                if (t.elto > bestTEl) { bestTgt = ti; bestTEl = t.elto; }
-            }
-            if (bestTgt >= 0)
-            {
-                if (m_trackingMode == 2) claimed.insert(bestTgt);
-                rvector tdir = rv_normal(rv_sub(ci.target[bestTgt].loc.pos.eci.s, loc.pos.eci.s));
-                // Instruments look along body +Z (long axis, nadir at identity LVLH)
-                slewBodyAxis(*cnodes[ni], rv_unitz(), tdir, dt, currentutc);
-                continue;
-            }
+            slewAttitude(*state, target, dt, currentutc);
         }
-
-        // ── 3. Sun pointing: average PV panel com = panel-normal in body ─
-        if (!ci.devspec.pvstrg.empty())
-        {
-            Vector panelSum;
-            for (const auto &pv : ci.devspec.pvstrg) panelSum += ci.pieces[pv.pidx].com;
-            double plen = panelSum.norm();
-            if (plen > 0.)
-            {
-                panelSum /= plen;
-                rvector panelBodyAxis{panelSum.x, panelSum.y, panelSum.z};
-
-                bool lunar = (loc.pos.extra.closest == COSMOS_MOON);
-                rvector sunDir = rv_normal(rv_smult(-1.,
-                    lunar ? loc.pos.extra.sun2moon.s : loc.pos.extra.sun2earth.s));
-
-                slewBodyAxis(*cnodes[ni], panelBodyAxis, sunDir, dt, currentutc);
-                continue;
-            }
-        }
-        // No pvstrg or no active target → leave LVLH attitude unchanged
     }
 }
 

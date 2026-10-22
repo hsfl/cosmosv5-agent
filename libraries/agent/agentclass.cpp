@@ -379,7 +379,7 @@ Agent::Agent(string realm_name,
     add_request("channel_enable", req_channel_enable, "channel state", "Set channel enabled state to the specified value");
     add_request("channel_touch", req_channel_touch, "channel [seconds]", "Reset channel age");
     // Standard subsystem requests: nops here, overridden by the subsystem agent (and interpreted by the simulator)
-    add_request("request_adcs", req_adcs, "point topo|lvlh|geoc|selc|icrf qx qy qz qw", "Point the spacecraft: attitude quaternion in the given frame");
+    add_request("request_adcs", req_adcs, "point topo|lvlh|geoc|selc|icrf qx qy qz qw | point hold | point <aim> [align <aim>]", "Point the spacecraft: attitude quaternion in a frame, hold, or aim a body axis (<aim> = sun|earth|nadir|velocity [axis] | target|station <name>|nearest [zenith_deg] [axis])");
     add_request("request_camera", req_camera, "snap frames rate inttime [tile]", "Take frames images (0 = continuous) at rate Hz with inttime seconds integration, saved tile frames (default 1000) per file");
     // Set up Full SOH string
     //            set_fullsohstring(json_list_of_fullsoh(cinfo));
@@ -5308,7 +5308,153 @@ double Agent::get_timeStart()
 }
 //! @}
 
+//! Parse a body axis: +X, -X, +Y, -Y, +Z or -Z (the sign may be left off for +)
+static bool parse_adcs_axis(const string &arg, rvector &axis)
+{
+    string a = arg;
+    double sign = 1.;
+    if (!a.empty() && (a[0] == '+' || a[0] == '-'))
+    {
+        sign = a[0] == '-' ? -1. : 1.;
+        a = a.substr(1);
+    }
+    if (a == "X" || a == "x")
+    {
+        axis = rv_unitx(sign);
+    }
+    else if (a == "Y" || a == "y")
+    {
+        axis = rv_unity(sign);
+    }
+    else if (a == "Z" || a == "z")
+    {
+        axis = rv_unitz(sign);
+    }
+    else
+    {
+        return false;
+    }
+    return true;
+}
+
+//! Parse one aim of request_adcs point, starting at args[i]
+//! mode [name [zenith]] [axis]. On return i is past the aim.
+static int32_t parse_adcs_aim(const vector<string> &args, size_t &i, Agent::AdcsAim &aim)
+{
+    if (i >= args.size())
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    aim.mode = args[i++];
+    if (aim.mode == "sun")
+    {
+        aim.axis = rv_unitz(-1.);
+    }
+    else if (aim.mode == "earth" || aim.mode == "station")
+    {
+        aim.axis = rv_unity(-1.);
+    }
+    else if (aim.mode == "nadir" || aim.mode == "target")
+    {
+        aim.axis = rv_unitz();
+    }
+    else if (aim.mode == "velocity")
+    {
+        aim.axis = rv_unitx();
+    }
+    else
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    if (aim.mode == "target" || aim.mode == "station")
+    {
+        if (i >= args.size() || args[i] == "align")
+        {
+            return GENERAL_ERROR_ARGS;
+        }
+        aim.name = args[i++];
+        if (aim.name == "nearest" && i < args.size())
+        {
+            char *end;
+            double zenith = strtod(args[i].c_str(), &end);
+            if (end != args[i].c_str() && *end == 0)
+            {
+                if (!(zenith >= 0. && zenith <= 180.))
+                {
+                    return GENERAL_ERROR_ARGS;
+                }
+                aim.zenith = RADOF(zenith);
+                ++i;
+            }
+        }
+    }
+    if (i < args.size() && parse_adcs_axis(args[i], aim.axis))
+    {
+        ++i;
+    }
+    return 0;
+}
+
 //! Parse request_adcs point
+//! Expected args, one of:
+//! - point topo|lvlh|geoc|selc|icrf qx qy qz qw
+//! - point hold
+//! - point <aim> [align <aim>]
+//!
+//! where <aim> is sun|earth|nadir|velocity [axis], or target|station <name> [axis],
+//! or target|station nearest [zenith] [axis]. axis is +X, -X, +Y, -Y, +Z or -Z,
+//! by default -Z for sun, -Y for earth and station, +Z for nadir and target and
+//! +X for velocity. zenith is the largest zenith angle in degrees, seen from the
+//! target, for nearest to pick it (default 90, the horizon).
+//! \param request Request.
+//! \param point Parsed pointing.
+//! \return Zero or negative error.
+int32_t Agent::parse_adcs_point(const string &request, AdcsPoint &point)
+{
+    vector<string> args = string_split(request);
+    if (args.size() < 3 || args[1] != "point")
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    point = AdcsPoint();
+    if (args[2] == "topo" || args[2] == "lvlh" || args[2] == "geoc" || args[2] == "selc" || args[2] == "icrf")
+    {
+        point.mode = "quaternion";
+        return parse_adcs_point(request, point.frame, point.q);
+    }
+    if (args[2] == "hold")
+    {
+        point.mode = "hold";
+        return args.size() == 3 ? 0 : GENERAL_ERROR_ARGS;
+    }
+    point.mode = "aim";
+    size_t i = 2;
+    int32_t iretn = parse_adcs_aim(args, i, point.aim);
+    if (iretn < 0)
+    {
+        return iretn;
+    }
+    if (i < args.size())
+    {
+        if (args[i] != "align")
+        {
+            return GENERAL_ERROR_ARGS;
+        }
+        ++i;
+        iretn = parse_adcs_aim(args, i, point.align);
+        if (iretn < 0)
+        {
+            return iretn;
+        }
+        if (i < args.size() || fabs(dot_rv(point.aim.axis, point.align.axis)) > .999)
+        {
+            return GENERAL_ERROR_ARGS;
+        }
+    }
+    return 0;
+}
+
+//! Parse request_adcs point with a quaternion
 //! Expected args:
 //! [0] request_adcs
 //! [1] point
@@ -5410,15 +5556,26 @@ int32_t Agent::parse_camera_snap(const string &request, uint32_t &frames, double
 //! \return Zero or negative error.
 int32_t Agent::req_adcs(string &request, string &response, Agent *agent)
 {
-    string frame;
-    quaternion q;
-    int32_t iretn = parse_adcs_point(request, frame, q);
+    AdcsPoint point;
+    int32_t iretn = parse_adcs_point(request, point);
     if (iretn < 0)
     {
-        response = "Usage: request_adcs point topo|lvlh|geoc|selc|icrf qx qy qz qw";
+        response = "Usage: request_adcs point topo|lvlh|geoc|selc|icrf qx qy qz qw | point hold | point <aim> [align <aim>], <aim> = sun|earth|nadir|velocity [axis] | target|station <name>|nearest [zenith] [axis]";
         return iretn;
     }
-    response = "nop: point " + frame + " " + std::to_string(q.d.x) + " " + std::to_string(q.d.y) + " " + std::to_string(q.d.z) + " " + std::to_string(q.w);
+    if (point.mode == "quaternion")
+    {
+        response = "nop: point " + point.frame + " " + std::to_string(point.q.d.x) + " " + std::to_string(point.q.d.y) + " " + std::to_string(point.q.d.z) + " " + std::to_string(point.q.w);
+    }
+    else
+    {
+        vector<string> args = string_split(request);
+        response = "nop:";
+        for (size_t i=1; i<args.size(); ++i)
+        {
+            response += " " + args[i];
+        }
+    }
     agent->debug_log.Printf("request_adcs %s\n", response.c_str());
     return 0;
 }

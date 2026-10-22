@@ -1307,6 +1307,30 @@ namespace Cosmos
             static int32_t req_adcs(string &, string &response, Agent *agent);
             static int32_t req_camera(string &, string &response, Agent *agent);
         public:
+            //! One symbolic pointing: aim a body axis at a direction
+            //! mode: sun, earth, nadir, velocity, target or station. For target and
+            //! station, name is the target's name or "nearest", which picks the closest
+            //! one in view whose zenith angle (seen from it) is within zenith.
+            struct AdcsAim
+            {
+                string mode;
+                string name;
+                double zenith = DPI2;  //!< Zenith limit for nearest [rad]
+                rvector axis;          //!< Body axis to aim
+            };
+            //! A parsed request_adcs point
+            //! mode "quaternion" (frame and q), "hold", or "aim" (aim, plus align when
+            //! align.mode is not empty: the second axis is brought as close as it can
+            //! be to the second direction, fixing the roll about the first).
+            struct AdcsPoint
+            {
+                string mode;
+                string frame;
+                quaternion q;
+                AdcsAim aim;
+                AdcsAim align;
+            };
+            static int32_t parse_adcs_point(const string &request, AdcsPoint &point);
             static int32_t parse_adcs_point(const string &request, string &frame, quaternion &q);
             static int32_t parse_camera_snap(const string &request, uint32_t &frames, double &rate, double &inttime, uint32_t &tile);
         };
