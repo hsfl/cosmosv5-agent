@@ -1934,6 +1934,19 @@ int32_t State::Init(string name, double idt, string stype, Propagator::Type ptyp
     json_map_node(&currentinfo);
     json_updatecosmosstruc(&currentinfo);
 
+    // Devices flagged on start powered at their nominal draw, as node_calc()
+    // does for agents; json_map_node() just reset every state to off.
+    for (devicestruc *dev : currentinfo.device)
+    {
+        if (dev->flag & DEVICE_FLAG_ON)
+        {
+            dev->state = 1;
+            dev->amp = dev->namp;
+            dev->volt = dev->nvolt;
+            dev->power = dev->amp * dev->volt;
+        }
+    }
+
     currentinfo.mass = currentinfo.node.phys.mass;
 
     switch (ptype)
