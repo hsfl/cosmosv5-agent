@@ -150,9 +150,25 @@ int32_t pos_extra(double utc, locstruc &loc)
     // works within each thread's formation Propagate() loop.
     thread_local double cached_utc = 0.;
     thread_local extrapos cached_extra;
+    // Only the time-dependent part is shared: the LVLH/perifocal transforms and
+    // closest belong to this node's position, so they are kept.
     if (cached_utc == utc)
     {
+        extrapos own = loc.pos.extra;
         loc.pos.extra = cached_extra;
+        loc.pos.extra.l2e = own.l2e;
+        loc.pos.extra.e2l = own.e2l;
+        loc.pos.extra.l2g = own.l2g;
+        loc.pos.extra.g2l = own.g2l;
+        loc.pos.extra.l2s = own.l2s;
+        loc.pos.extra.s2l = own.s2l;
+        loc.pos.extra.l2p = own.l2p;
+        loc.pos.extra.p2l = own.p2l;
+        loc.pos.extra.dl2p = own.dl2p;
+        loc.pos.extra.dp2l = own.dp2l;
+        loc.pos.extra.ddl2p = own.ddl2p;
+        loc.pos.extra.ddp2l = own.ddp2l;
+        loc.pos.extra.closest = own.closest;
         return 0;
     }
 
