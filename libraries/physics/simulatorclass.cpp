@@ -1718,8 +1718,9 @@ int32_t Simulator::LoadQueue(string nodename, string filepath)
 
 //! Run each node's due commands at the current simulated time
 //! Recognized requests are interpreted in-process: request_adcs point sets the
-//! requested attitude (loc_req.att) and request_camera snap is recorded. Every due
-//! Event is added to the node's event list.
+//! requested attitude (loc_req.att), request_eps switches a device on or off, and
+//! request_camera snap starts an imaging session (one per request, so sessions on
+//! different cameras run independently). Every due Event is added to the node's event list.
 //! \return Number of Events run, or negative error.
 int32_t Simulator::ParseCommands()
 {
@@ -1775,16 +1776,28 @@ int32_t Simulator::ParseCommands()
                         attcommands[name] = point;
                     }
                 }
+                else if (!args.empty() && args[0] == "request_eps")
+                {
+                    if (EpsSwitch(*state, cmd.data) < 0)
+                    {
+                        cevent.flag = (cevent.flag & ~EVENT_FLAG_COLOR) | EVENT_FLAG_COLOR_RED;
+                    }
+                }
                 else if (!args.empty() && args[0] == "request_camera")
                 {
+                    string camera;
                     uint32_t frames, tile;
                     double rate, inttime;
-                    if (Support::Agent::parse_camera_snap(cmd.data, frames, rate, inttime, tile) >= 0)
+                    devicestruc *dev = nullptr;
+                    if (Support::Agent::parse_camera_snap(cmd.data, camera, frames, rate, inttime, tile) >= 0
+                        && (camera.empty() || ((dev = findDevice(state->currentinfo, camera)) != nullptr
+                                               && dev->type == static_cast<uint16_t>(DeviceType::CAM))))
                     {
                         // Reported by ImagingStep() when the session ends
                         ImagingSession session;
                         session.name = cmd.name;
                         session.request = cmd.data;
+                        session.camera = camera;
                         session.flag = cmd.flag;
                         if (cmd.is_conditional())
                         {
@@ -1811,6 +1824,63 @@ int32_t Simulator::ParseCommands()
         ImagingStep(*state);
     }
     return count;
+}
+
+//! Find a device by its piece name
+//! \param info Node to search.
+//! \param name Piece name, as in the node file.
+//! \return The device, or nullptr when there is no such piece or it has no device.
+devicestruc *Simulator::findDevice(cosmosstruc &info, const string &name)
+{
+    int32_t pidx = json_findpiece(&info, name);
+    if (pidx < 0)
+    {
+        return nullptr;
+    }
+    // A piece without a device has no cidx of its own
+    uint16_t cidx = info.pieces[pidx].cidx;
+    if (cidx >= info.device.size() || info.device[cidx]->pidx != pidx)
+    {
+        return nullptr;
+    }
+    return info.device[cidx];
+}
+
+//! Switch a device on or off for request_eps
+//! On powers the device at its nominal draw, as State::Init() does for devices
+//! flagged DEVICE_FLAG_ON; off zeroes its draw. The electrical propagator picks
+//! up the change on its next step.
+//! \param state Node to act on.
+//! \param request request_eps on|off device
+//! \return Zero or negative error.
+int32_t Simulator::EpsSwitch(Physics::State &state, const string &request)
+{
+    bool on;
+    string device;
+    int32_t iretn = Support::Agent::parse_eps_switch(request, on, device);
+    if (iretn < 0)
+    {
+        return iretn;
+    }
+    devicestruc *dev = findDevice(state.currentinfo, device);
+    if (dev == nullptr)
+    {
+        return GENERAL_ERROR_NAME;
+    }
+    if (on)
+    {
+        dev->state = 1;
+        dev->amp = dev->namp;
+        dev->volt = dev->nvolt;
+    }
+    else
+    {
+        dev->state = 0;
+        dev->amp = 0.;
+        dev->volt = 0.;
+    }
+    dev->power = dev->amp * dev->volt;
+    return 0;
 }
 
 //! Take the frames each of a node's imaging sessions is allowed up to the current time
@@ -1866,7 +1936,8 @@ void Simulator::ImagingStep(Physics::State &state)
 
 //! Report the current tile of an imaging session as one event (one file) and start a new tile
 //! utc is the tile's first frame, dtime runs to the end of its last frame's integration,
-//! value is the number of frames. Red if the session ended short of its frames.
+//! value is the number of frames, and data is the snap request, which names the camera
+//! when one was given. Red if the session ended short of its frames.
 void Simulator::ImagingTile(Physics::State &state, ImagingSession &session, bool shortened)
 {
     eventstruc cevent;
@@ -2417,7 +2488,7 @@ void Simulator::slewAttitude(Physics::State &state, const quaternion &targetIcrf
 int32_t Simulator::aimDirection(const cosmosstruc &info, const Support::Agent::AdcsAim &aim, rvector &dir)
 {
     const locstruc &loc = info.node.loc;
-    bool lunar = (loc.pos.extra.closest == COSMOS_MOON);
+    bool lunar = (Physics::closest_body(loc) == COSMOS_MOON);
     if (aim.mode == "sun")
     {
         dir = rv_sub(rv_smult(-1., loc.pos.extra.sun2earth.s), loc.pos.eci.s);

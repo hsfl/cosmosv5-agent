@@ -380,7 +380,8 @@ Agent::Agent(string realm_name,
     add_request("channel_touch", req_channel_touch, "channel [seconds]", "Reset channel age");
     // Standard subsystem requests: nops here, overridden by the subsystem agent (and interpreted by the simulator)
     add_request("request_adcs", req_adcs, "point topo|lvlh|geoc|selc|icrf qx qy qz qw | point hold | point <aim> [align <aim>]", "Point the spacecraft: attitude quaternion in a frame, hold, or aim a body axis (<aim> = sun|earth|nadir|velocity [axis] | target|station <name>|nearest [zenith_deg] [axis])");
-    add_request("request_camera", req_camera, "snap frames rate inttime [tile]", "Take frames images (0 = continuous) at rate Hz with inttime seconds integration, saved tile frames (default 1000) per file");
+    add_request("request_camera", req_camera, "snap [camera] frames rate inttime [tile]", "Take frames images with camera (a CAM piece name; optional) (0 = continuous) at rate Hz with inttime seconds integration, saved tile frames (default 1000) per file");
+    add_request("request_eps", req_eps, "on|off device", "Switch a device on (nominal draw) or off, by its piece name");
     // Set up Full SOH string
     //            set_fullsohstring(json_list_of_fullsoh(cinfo));
 
@@ -5502,50 +5503,89 @@ int32_t Agent::parse_adcs_point(const string &request, string &frame, quaternion
 //! Expected args:
 //! [0] request_camera
 //! [1] snap
+//! [2] camera: optional, piece name of a CAM device; taken as the camera when it
+//!     is not a number
 //! [2] frames: number of images, 0 for continuous
 //! [3] rate: images per second
 //! [4] inttime: integration time in seconds
 //! [5] tile: optional, frames per tile (one file), default 1000
+//! (frames and after shift by one when a camera is given)
 //! \param request Request.
+//! \param camera Camera piece name, or empty when none was given.
 //! \param frames Number of images, 0 for continuous.
 //! \param rate Images per second.
 //! \param inttime Integration time in seconds.
 //! \param tile Frames per tile.
 //! \return Zero or negative error.
-int32_t Agent::parse_camera_snap(const string &request, uint32_t &frames, double &rate, double &inttime, uint32_t &tile)
+int32_t Agent::parse_camera_snap(const string &request, string &camera, uint32_t &frames, double &rate, double &inttime, uint32_t &tile)
 {
     vector<string> args = string_split(request);
-    if ((args.size() != 5 && args.size() != 6) || args[1] != "snap")
+    if (args.size() < 5 || args[1] != "snap")
     {
         return GENERAL_ERROR_ARGS;
     }
     char *end;
-    long value = strtol(args[2].c_str(), &end, 10);
-    if (end == args[2].c_str() || *end != 0 || value < 0)
+    size_t i = 2;
+    camera.clear();
+    strtod(args[i].c_str(), &end);
+    if (end == args[i].c_str() || *end != 0)
+    {
+        camera = args[i++];
+    }
+    if (args.size() != i + 3 && args.size() != i + 4)
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    long value = strtol(args[i].c_str(), &end, 10);
+    if (end == args[i].c_str() || *end != 0 || value < 0)
     {
         return GENERAL_ERROR_ARGS;
     }
     frames = value;
-    rate = strtod(args[3].c_str(), &end);
-    if (end == args[3].c_str() || *end != 0 || !(rate > 0.))
+    ++i;
+    rate = strtod(args[i].c_str(), &end);
+    if (end == args[i].c_str() || *end != 0 || !(rate > 0.))
     {
         return GENERAL_ERROR_ARGS;
     }
-    inttime = strtod(args[4].c_str(), &end);
-    if (end == args[4].c_str() || *end != 0 || !(inttime > 0.))
+    ++i;
+    inttime = strtod(args[i].c_str(), &end);
+    if (end == args[i].c_str() || *end != 0 || !(inttime > 0.))
     {
         return GENERAL_ERROR_ARGS;
     }
+    ++i;
     tile = 1000;
-    if (args.size() == 6)
+    if (args.size() > i)
     {
-        value = strtol(args[5].c_str(), &end, 10);
-        if (end == args[5].c_str() || *end != 0 || value < 1)
+        value = strtol(args[i].c_str(), &end, 10);
+        if (end == args[i].c_str() || *end != 0 || value < 1)
         {
             return GENERAL_ERROR_ARGS;
         }
         tile = value;
     }
+    return 0;
+}
+
+//! Parse request_eps on|off
+//! Expected args:
+//! [0] request_eps
+//! [1] on or off
+//! [2] device: piece name of the device, as in the node file
+//! \param request Request.
+//! \param on True for on, false for off.
+//! \param device Piece name of the device.
+//! \return Zero or negative error.
+int32_t Agent::parse_eps_switch(const string &request, bool &on, string &device)
+{
+    vector<string> args = string_split(request);
+    if (args.size() != 3 || (args[1] != "on" && args[1] != "off"))
+    {
+        return GENERAL_ERROR_ARGS;
+    }
+    on = args[1] == "on";
+    device = args[2];
     return 0;
 }
 
@@ -5587,16 +5627,37 @@ int32_t Agent::req_adcs(string &request, string &response, Agent *agent)
 //! \return Zero or negative error.
 int32_t Agent::req_camera(string &request, string &response, Agent *agent)
 {
+    string camera;
     uint32_t frames, tile;
     double rate, inttime;
-    int32_t iretn = parse_camera_snap(request, frames, rate, inttime, tile);
+    int32_t iretn = parse_camera_snap(request, camera, frames, rate, inttime, tile);
     if (iretn < 0)
     {
-        response = "Usage: request_camera snap frames rate inttime [tile]";
+        response = "Usage: request_camera snap [camera] frames rate inttime [tile]";
         return iretn;
     }
-    response = "nop: snap " + std::to_string(frames) + " " + std::to_string(rate) + " " + std::to_string(inttime) + " " + std::to_string(tile);
+    response = "nop: snap " + (camera.empty() ? "" : camera + " ") + std::to_string(frames) + " " + std::to_string(rate) + " " + std::to_string(inttime) + " " + std::to_string(tile);
     agent->debug_log.Printf("request_camera %s\n", response.c_str());
+    return 0;
+}
+
+//! Default request_eps: validate and acknowledge. Overridden by the EPS agent.
+//! \param request Request.
+//! \param response Any response.
+//! \param agent Pointer to Agent.
+//! \return Zero or negative error.
+int32_t Agent::req_eps(string &request, string &response, Agent *agent)
+{
+    bool on;
+    string device;
+    int32_t iretn = parse_eps_switch(request, on, device);
+    if (iretn < 0)
+    {
+        response = "Usage: request_eps on|off device";
+        return iretn;
+    }
+    response = string("nop: ") + (on ? "on " : "off ") + device;
+    agent->debug_log.Printf("request_eps %s\n", response.c_str());
     return 0;
 }
 } // end of namespace Support

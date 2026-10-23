@@ -60,6 +60,9 @@ namespace Cosmos
         //! sees the node above its minimum elevation and the Moon does not lie
         //! between them. \param loc node location (eci/sci valid) \param gs station.
         bool comm_link_clear(const Convert::locstruc &loc, const targetstruc &gs);
+        //! Body the node is closest to (COSMOS_EARTH or COSMOS_MOON), from pos.extra.closest
+        //! when set, else derived from the eci position
+        uint16_t closest_body(const Convert::locstruc &loc);
 
         class Structure
         {

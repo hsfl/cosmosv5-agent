@@ -1306,6 +1306,7 @@ namespace Cosmos
             static int32_t req_channel_touch(string &, string &response, Agent *agent);
             static int32_t req_adcs(string &, string &response, Agent *agent);
             static int32_t req_camera(string &, string &response, Agent *agent);
+            static int32_t req_eps(string &, string &response, Agent *agent);
         public:
             //! One symbolic pointing: aim a body axis at a direction
             //! mode: sun, earth, nadir, velocity, target or station. For target and
@@ -1332,7 +1333,8 @@ namespace Cosmos
             };
             static int32_t parse_adcs_point(const string &request, AdcsPoint &point);
             static int32_t parse_adcs_point(const string &request, string &frame, quaternion &q);
-            static int32_t parse_camera_snap(const string &request, uint32_t &frames, double &rate, double &inttime, uint32_t &tile);
+            static int32_t parse_camera_snap(const string &request, string &camera, uint32_t &frames, double &rate, double &inttime, uint32_t &tile);
+            static int32_t parse_eps_switch(const string &request, bool &on, string &device);
         };
     } // end of namespace Support
 } // end of namespace Cosmos

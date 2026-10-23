@@ -1947,6 +1947,18 @@ int32_t State::Init(string name, double idt, string stype, Propagator::Type ptyp
         }
     }
 
+    // Battery capacity from the battery devices, as node_calc() does, but in
+    // joules (the electrical propagator's unit): capacity [A·s] at the mean of
+    // each battery's voltage range. Without batteries the default stays.
+    if (currentinfo.devspec.batt_cnt)
+    {
+        currentinfo.node.phys.battcap = 0.f;
+        for (const battstruc &batt : currentinfo.devspec.batt)
+        {
+            currentinfo.node.phys.battcap += batt.capacity * (batt.minvolt + batt.maxvolt) / 2.f;
+        }
+    }
+
     currentinfo.mass = currentinfo.node.phys.mass;
 
     switch (ptype)
@@ -2801,9 +2813,17 @@ int32_t ThermalPropagator::Propagate(double nextutc)
     return 0;
 }
 
+//! Start the battery at a fraction of its capacity
+//! A charge already set before Init (battlev > 0) is kept; otherwise the battery
+//! starts at bp * battcap. Both are in joules.
+//! \param bp Starting charge as a fraction of battcap.
 int32_t ElectricalPropagator::Init(float bp)
 {
     battery_charge = bp;
+    if (currentinfo->node.phys.battlev <= 0.f)
+    {
+        currentinfo->node.phys.battlev = battery_charge * currentinfo->node.phys.battcap;
+    }
     return 0;
 }
 
@@ -3107,10 +3127,10 @@ int32_t MetricGenerator::Reset(double nextutc)
     return 0;
 }
 
-/// Body the node is closest to. Uses pos.extra.closest when it is valid; propagators
-/// that advance sci/eci directly (e.g. LunarPositionPropagator) never set it, so
-/// otherwise derive it the same way pos_eci() does.
-static uint16_t eventClosestBody(const Convert::locstruc &loc)
+/// Body the node is closest to. Uses pos.extra.closest when it is valid; a position
+/// set without pos_eci()/pos_sci() may leave it unset, so otherwise derive it the
+/// same way pos_eci() does.
+uint16_t closest_body(const Convert::locstruc &loc)
 {
     if (loc.pos.extra.closest == COSMOS_EARTH || loc.pos.extra.closest == COSMOS_MOON) {
         return loc.pos.extra.closest;
@@ -3145,7 +3165,7 @@ bool comm_link_clear(const Convert::locstruc &loc, const targetstruc &gs)
 /// Returns the geodetic/selenographic position of the node for the closest body.
 Convert::geoidpos OrbitalEventGenerator::currentGeoidPos() const
 {
-    switch (eventClosestBody(currentinfo->node.loc)) {
+    switch (closest_body(currentinfo->node.loc)) {
         case COSMOS_MOON:  return currentinfo->node.loc.pos.selg;
         default:           return currentinfo->node.loc.pos.geod;
     }
@@ -3164,7 +3184,7 @@ int32_t OrbitalEventGenerator::check_all_event(bool force_end)
         iretn += check_lat_event(force_end, i*RADOF(10.));
     }
     // Update lastlat from the geodetic frame of the closest body
-    switch (eventClosestBody(currentinfo->node.loc)) {
+    switch (closest_body(currentinfo->node.loc)) {
         case COSMOS_MOON:  lastlat = currentinfo->node.loc.pos.selg.s.lat; break;
         default:           lastlat = currentinfo->node.loc.pos.geod.s.lat; break;
     }
@@ -3177,7 +3197,7 @@ int32_t OrbitalEventGenerator::check_lat_event(bool force_end, float lat)
     int32_t iretn = 0;
     // Select geodetic frame of the closest body
     double curlat;
-    switch (eventClosestBody(currentinfo->node.loc)) {
+    switch (closest_body(currentinfo->node.loc)) {
         case COSMOS_MOON:  curlat = currentinfo->node.loc.pos.selg.s.lat; break;
         default:           curlat = currentinfo->node.loc.pos.geod.s.lat; break;
     }
@@ -3304,7 +3324,7 @@ int32_t OrbitalEventGenerator::check_land_event(bool force_end)
     // Select geodetic frame and DEM body from the closest body
     double land_lat, land_lon, dem_scale;
     int dem_body;
-    switch (eventClosestBody(currentinfo->node.loc)) {
+    switch (closest_body(currentinfo->node.loc)) {
         case COSMOS_MOON:
             land_lat  = currentinfo->node.loc.pos.selg.s.lat;
             land_lon  = currentinfo->node.loc.pos.selg.s.lon;
@@ -3428,7 +3448,7 @@ uint32_t OrbitalEventGenerator::state_flags() const
 int32_t OrbitalEventGenerator::check_moon_event(bool force_end)
 {
     bool blocked = false;
-    if (eventClosestBody(currentinfo->node.loc) == COSMOS_MOON)
+    if (closest_body(currentinfo->node.loc) == COSMOS_MOON)
     {
         // Moon at the origin of the SCI frame; Earth is moon2earth = sun2earth - sun2moon.
         rvector sc = currentinfo->node.loc.pos.sci.s;

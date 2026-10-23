@@ -135,6 +135,7 @@ namespace Cosmos
             {
                 string name;
                 string request;
+                string camera;              //!< CAM piece name, empty when none was given
                 uint32_t flag = 0;
                 Support::Equation condition;
                 uint32_t frames = 0;    //!< 0 = continuous
@@ -182,6 +183,8 @@ namespace Cosmos
             static int32_t commandedAttitude(const cosmosstruc &info, const AttitudeCommand &command, double currentutc, quaternion &icrf);
             static int32_t aimDirection(const cosmosstruc &info, const Support::Agent::AdcsAim &aim, rvector &dir);
             void ImagingStep(Physics::State &state);
+            int32_t EpsSwitch(Physics::State &state, const string &request);
+            static devicestruc *findDevice(cosmosstruc &info, const string &name);
             void ImagingTile(Physics::State &state, ImagingSession &session, bool shortened);
 
             State RunState = State::Halted;
