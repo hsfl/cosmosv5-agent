@@ -13770,16 +13770,23 @@ int32_t update_target(Convert::locstruc source, targetstruc &target)
         Convert::loc_update(target.loc);
     }
     targetloc = target.loc;
+    // Nearest point of the target's lat/lon box, in the target body's own frame:
+    // selenographic for Moon targets (size is in Moon radians), geodetic otherwise.
+    const gvector &src = isMoon ? source.pos.selg.s : source.pos.geod.s;
+    const gvector &srcv = isMoon ? source.pos.selg.v : source.pos.geod.v;
+    const gvector &tgt = isMoon ? target.loc.pos.selg.s : target.loc.pos.geod.s;
+    gvector &edge = isMoon ? targetloc.pos.selg.s : targetloc.pos.geod.s;
+    auto set_edge = [&]() { if (isMoon) Convert::pos_set_selg(targetloc); else Convert::pos_set_geod(targetloc); };
     if (target.size.lat)
     {
-        if (source.pos.geod.s.lon >= fixangle(target.loc.pos.geod.s.lon - target.size.lon / 2., false) && source.pos.geod.s.lon <= fixangle(target.loc.pos.geod.s.lon + target.size.lon / 2., false))
+        if (src.lon >= fixangle(tgt.lon - target.size.lon / 2., false) && src.lon <= fixangle(tgt.lon + target.size.lon / 2., false))
         {
-            targetloc.pos.geod.s.lon = source.pos.geod.s.lon;
-            if (source.pos.geod.s.lat >= target.loc.pos.geod.s.lat + target.size.lat / 2.)
+            edge.lon = src.lon;
+            if (src.lat >= tgt.lat + target.size.lat / 2.)
             {
-                targetloc.pos.geod.s.lat = target.loc.pos.geod.s.lat + target.size.lat / 2.;
-                Convert::pos_set_geod(targetloc);
-                if (source.pos.geod.v.lat < 0)
+                edge.lat = tgt.lat + target.size.lat / 2.;
+                set_edge();
+                if (srcv.lat < 0)
                 {
                     target.min = 1.;
                     target.utc = targetloc.utc;
@@ -13790,11 +13797,11 @@ int32_t update_target(Convert::locstruc source, targetstruc &target)
                     target.utc = targetloc.utc;
                 }
             }
-            else if (source.pos.geod.s.lat <= target.loc.pos.geod.s.lat - target.size.lat / 2)
+            else if (src.lat <= tgt.lat - target.size.lat / 2)
             {
-                targetloc.pos.geod.s.lat = target.loc.pos.geod.s.lat - target.size.lat / 2.;
-                Convert::pos_set_geod(targetloc);
-                if (source.pos.geod.v.lat > 0)
+                edge.lat = tgt.lat - target.size.lat / 2.;
+                set_edge();
+                if (srcv.lat > 0)
                 {
                     target.min = 1.;
                     target.utc = targetloc.utc;
@@ -13811,7 +13818,7 @@ int32_t update_target(Convert::locstruc source, targetstruc &target)
                 {
                     target.utc = targetloc.utc;
                 }
-                Convert::pos_set_geod(targetloc);
+                set_edge();
                 target.min = 2.;
             }
         }

@@ -2414,7 +2414,7 @@ void Simulator::SetFormation(string type, double spacing)
 }
 
 //! Angle to slew this step toward a pointing error of angle
-//! Bang-bang slew time t = 2*sqrt(angle * I_min / tau_max), or a nominal 0.5 deg/s
+//! Bang-bang slew time t = 2*sqrt(angle * I_min / tau_max), or a nominal 3 deg/s
 //! when the node has no torque limit.
 double Simulator::slewStepAngle(const Physics::State &state, double angle, double dt)
 {
@@ -2426,7 +2426,7 @@ double Simulator::slewStepAngle(const Physics::State &state, double angle, doubl
         double t_slew  = 2.0 * std::sqrt(angle * I_min / maxtorque);
         return angle * std::min(1.0, dt / std::max(t_slew, dt));
     }
-    return std::min(angle, RADOF(0.5) * dt);
+    return std::min(angle, RADOF(3.) * dt);
 }
 
 //! Set the node's ICRF attitude and keep it across steps
