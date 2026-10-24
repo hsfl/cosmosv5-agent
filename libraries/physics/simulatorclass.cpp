@@ -1690,10 +1690,15 @@ int32_t Simulator::Propagate(double nextutc, bool enablethrust, bool enabletorqu
 }
 
 //! Load a node's command queue
-//! The queue is the one agent_exec saves with CommandQueue::save_commands(), by
-//! default <realm>/nodes/<node>/temp/exec/.queue. A missing file gives an empty queue.
+//! By default the queue is the standing set of command events in the node file,
+//! the "command_events" array of <realm>/nodes/<node>.json: each element is an Event
+//! (name, type, flag, data, condition, utc, timeout; other keys are ignored). The node
+//! starts as if it had just booted with that set. A real agent's runtime state
+//! (temp/exec/.queue) and uplinked .command files are not read. A missing file or
+//! array gives an empty queue.
 //! \param nodename Node name.
-//! \param filepath Queue file, or empty for the default.
+//! \param filepath A saved queue file (CommandQueue::save_commands() format) to load
+//! instead, e.g. for tests, or empty for the node file.
 //! \return Number of commands in the queue, or negative error.
 int32_t Simulator::LoadQueue(string nodename, string filepath)
 {
@@ -1701,12 +1706,28 @@ int32_t Simulator::LoadQueue(string nodename, string filepath)
     queue.reset(new Support::CommandQueue);
     if (filepath.empty())
     {
-        string nodedir = get_nodedir(realmname, nodename);
-        if (nodedir.empty())
+        ifstream nodefile(get_realmdir(realmname) + "/nodes/" + nodename + ".json");
+        if (!nodefile.is_open())
         {
             return 0;
         }
-        filepath = nodedir + "/temp/exec/.queue";
+        string contents((std::istreambuf_iterator<char>(nodefile)), std::istreambuf_iterator<char>());
+        string error;
+        json11::Json jnode = json11::Json::parse(contents, error);
+        if (!error.empty())
+        {
+            return JSON_ERROR_SCAN;
+        }
+        for (const json11::Json &jevent : jnode["command_events"].array_items())
+        {
+            Event cmd;
+            cmd.set_command(jevent.dump());
+            if (cmd.is_command())
+            {
+                queue->add_command(cmd);
+            }
+        }
+        return queue->get_command_size();
     }
     size_t slash = filepath.find_last_of('/');
     if (slash == string::npos)
