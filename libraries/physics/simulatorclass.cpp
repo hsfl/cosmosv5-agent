@@ -2430,9 +2430,30 @@ double Simulator::slewStepAngle(const Physics::State &state, double angle, doubl
 }
 
 //! Set the node's ICRF attitude and keep it across steps
-void Simulator::setSlewedAttitude(Physics::State &state, const quaternion &icrf, double currentutc)
+//! The angular velocity is the rate the attitude propagator left (the LVLH
+//! frame's, carrying the last attitude along) plus the rate of this step's slew
+//! from that attitude to icrf over dt [s].
+void Simulator::setSlewedAttitude(Physics::State &state, const quaternion &icrf, double dt, double currentutc)
 {
     qatt &catt = state.currentinfo.node.loc.att.icrf;
+    if (dt > 0.)
+    {
+        // Rotation of the body axes in ICRF over the step: conj(icrf) = d * conj(s)
+        quaternion d = q_fmult(q_conjugate(icrf), catt.s);
+        if (d.w < 0.)
+        {
+            d.w = -d.w;
+            d.d.x = -d.d.x;
+            d.d.y = -d.d.y;
+            d.d.z = -d.d.z;
+        }
+        double sinHalf = std::sqrt(d.d.x*d.d.x + d.d.y*d.d.y + d.d.z*d.d.z);
+        if (sinHalf > 0.)
+        {
+            double rate = 2. * std::atan2(sinHalf, d.w) / dt / sinHalf;
+            catt.v = rv_add(catt.v, rvector(d.d.x * rate, d.d.y * rate, d.d.z * rate));
+        }
+    }
     catt.s   = icrf;
     catt.utc = currentutc;
     att_set_icrf(state.currentinfo.node.loc);
@@ -2464,7 +2485,7 @@ void Simulator::slewAttitude(Physics::State &state, const quaternion &targetIcrf
     double stepAng = slewStepAngle(state, angle, dt);
     if (stepAng >= angle || angle < 1e-6)
     {
-        setSlewedAttitude(state, q1, currentutc);
+        setSlewedAttitude(state, q1, dt, currentutc);
         return;
     }
     double sinHalf = std::sin(angle / 2.);
@@ -2477,7 +2498,7 @@ void Simulator::slewAttitude(Physics::State &state, const quaternion &targetIcrf
     q.d.y = s0*q0.d.y + s1*q1.d.y;
     q.d.z = s0*q0.d.z + s1*q1.d.z;
     normalize_q(&q);
-    setSlewedAttitude(state, q, currentutc);
+    setSlewedAttitude(state, q, dt, currentutc);
 }
 
 //! Unit ICRF direction from the node for one aim of request_adcs point

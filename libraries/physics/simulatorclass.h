@@ -179,7 +179,7 @@ namespace Cosmos
                                      const quaternion &targetIcrf,
                                      double dt, double currentutc);
             static double slewStepAngle(const Physics::State &state, double angle, double dt);
-            static void setSlewedAttitude(Physics::State &state, const quaternion &icrf, double currentutc);
+            static void setSlewedAttitude(Physics::State &state, const quaternion &icrf, double dt, double currentutc);
             static int32_t commandedAttitude(const cosmosstruc &info, const AttitudeCommand &command, double currentutc, quaternion &icrf);
             static int32_t aimDirection(const cosmosstruc &info, const Support::Agent::AdcsAim &aim, rvector &dir);
             void ImagingStep(Physics::State &state);
