@@ -2268,18 +2268,23 @@ int32_t att_icrf2geoc(locstruc &loc)
     alpha = rv_smult(2. / (radius * radius), rv_cross(rv_mmult(loc.pos.extra.j2e, loc.pos.eci.s), rv_mmult(loc.pos.extra.dj2e, loc.pos.eci.v)));
     loc.att.geoc.a = rv_add(loc.att.geoc.a, alpha);
 
-    // Convert ITRF attitude to Topocentric
-    iretn = att_planec2topo(loc);
-    if (iretn < 0)
+    // Topocentric and LVLH come from the frame of the body being orbited; near
+    // the Moon that is selc, which att_icrf2selc() synchronizes them from.
+    if (loc.pos.extra.closest != COSMOS_MOON)
     {
-        return iretn;
-    }
+        // Convert ITRF attitude to Topocentric
+        iretn = att_planec2topo(loc);
+        if (iretn < 0)
+        {
+            return iretn;
+        }
 
-    // Convert ITRF attitude to LVLH
-    iretn = att_planec2lvlh(loc);
-    if (iretn < 0)
-    {
-        return iretn;
+        // Convert ITRF attitude to LVLH
+        iretn = att_planec2lvlh(loc);
+        if (iretn < 0)
+        {
+            return iretn;
+        }
     }
 
     return 0;
@@ -2354,7 +2359,7 @@ int32_t att_geoc(locstruc &loc)
     }
     loc.att.utc = loc.att.geoc.utc;
 
-    if (loc.att.geoc.pass > loc.att.topo.pass)
+    if (loc.pos.extra.closest != COSMOS_MOON && loc.att.geoc.pass > loc.att.topo.pass)
     {
         iretn = att_planec2topo(loc);
         if (iretn < 0)
@@ -2367,7 +2372,7 @@ int32_t att_geoc(locstruc &loc)
             return iretn;
         }
     }
-    if (loc.att.geoc.pass > loc.att.lvlh.pass)
+    if (loc.pos.extra.closest != COSMOS_MOON && loc.att.geoc.pass > loc.att.lvlh.pass)
     {
         iretn = att_planec2lvlh(loc);
         if (iretn < 0)
@@ -2445,18 +2450,23 @@ int32_t att_icrf2selc(locstruc &loc)
     alpha = rv_smult(2. / (radius * radius), rv_cross(rv_mmult(loc.pos.extra.j2s, loc.pos.eci.s), rv_mmult(dpm, loc.pos.eci.v)));
     loc.att.selc.a = rv_add(loc.att.selc.a, alpha);
 
-    // Synchronize LVLH
-    iretn = att_planec2lvlh(loc);
-    if (iretn < 0)
+    // LVLH and Topo come from the frame of the body being orbited; away from
+    // the Moon that is geoc, which att_icrf2geoc() synchronizes them from.
+    if (loc.pos.extra.closest == COSMOS_MOON)
     {
-        return iretn;
-    }
+        // Synchronize LVLH
+        iretn = att_planec2lvlh(loc);
+        if (iretn < 0)
+        {
+            return iretn;
+        }
 
-    // Synchronize Topo
-    iretn = att_planec2topo(loc);
-    if (iretn < 0)
-    {
-        return iretn;
+        // Synchronize Topo
+        iretn = att_planec2topo(loc);
+        if (iretn < 0)
+        {
+            return iretn;
+        }
     }
 
     return 0;
@@ -2524,7 +2534,7 @@ int32_t att_selc(locstruc &loc)
         return CONVERT_ERROR_UTC;
     }
 
-    if (loc.att.selc.pass > loc.att.topo.pass)
+    if (loc.pos.extra.closest == COSMOS_MOON && loc.att.selc.pass > loc.att.topo.pass)
     {
         iretn = att_planec2topo(loc);
         if (iretn < 0)
@@ -2538,7 +2548,7 @@ int32_t att_selc(locstruc &loc)
             return iretn;
         }
     }
-    if (loc.att.selc.pass > loc.att.lvlh.pass)
+    if (loc.pos.extra.closest == COSMOS_MOON && loc.att.selc.pass > loc.att.lvlh.pass)
     {
         iretn = att_planec2lvlh(loc);
         if (iretn < 0)
