@@ -197,6 +197,13 @@ namespace
 } // anonymous namespace (FLO)
 // ---------------------------------------------------------------------------
 
+//! Start time for an orbit whose own epoch is not absolute: the Init() base if that is
+//! already an MJD (> 3600), otherwise the base as an offset from now.
+static double epoch_base(double base)
+{
+    return base > 3600. ? base : base + currentmjd();
+}
+
 int32_t Simulator::Init(double idt, string realm, double iutc)
 {
     realmname = realm;
@@ -464,7 +471,7 @@ int32_t Simulator::ParseOrbitString(string args)
         }
         else
         {
-            initialutc += currentmjd();
+            initialutc = epoch_base(initialutc);
         }
         currentutc = initialutc;
         offsetutc = initialutc - currentmjd();
@@ -519,7 +526,7 @@ int32_t Simulator::ParseOrbitString(string args)
         }
         else
         {
-            initialutc += currentmjd();
+            initialutc = epoch_base(initialutc);
         }
         currentutc = initialutc;
         offsetutc = initialutc - currentmjd();
@@ -530,7 +537,6 @@ int32_t Simulator::ParseOrbitString(string args)
             endutc = initialutc + deltautc;
         }
         kepstruc kep;
-        initialutc += currentmjd();
         kep.utc = initialutc;
         kep.ea = values["ea"].number_value();
         kep.i = values["i"].number_value();
@@ -594,7 +600,7 @@ int32_t Simulator::ParseOrbitString(string args)
         }
         else
         {
-            initialutc += currentmjd() + values["utc"].number_value();
+            initialutc = epoch_base(initialutc) + values["utc"].number_value();
         }
         currentutc = initialutc;
         offsetutc  = initialutc - currentmjd();
@@ -683,7 +689,7 @@ int32_t Simulator::ParseOrbitString(string args)
         }
         else
         {
-            initialutc += currentmjd() + values["utc"].number_value();
+            initialutc = epoch_base(initialutc) + values["utc"].number_value();
         }
         currentutc = initialutc;
         offsetutc  = initialutc - currentmjd();

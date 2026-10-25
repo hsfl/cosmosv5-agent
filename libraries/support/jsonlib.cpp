@@ -12276,7 +12276,7 @@ const char *json_devices_specific(string &jstring, cosmosstruc *cinfo)
 //! Build the "event" shortcut payload.
 //! Curated subset used for the jtype:"event" wire message — NOT a full
 //! eventstruc::to_json() dump. Canonical field names/shape (node/utc/name/
-//! type/flag/el/az/pos) match the original propagatorv3.cpp jsonevent/
+//! type/flag/el/az/dtime/value/data/pos) extend the original propagatorv3.cpp jsonevent/
 //! postevent literals; other producers should converge to this instead of
 //! inlining their own json11::Json::object{...}.
 //! \param node Name of the node the event belongs to.
@@ -12293,13 +12293,16 @@ json11::Json json_event_payload(const string &node, const eventstruc &event)
         { "flag", static_cast<int>(event.flag) },
         { "el", event.el },
         { "az", event.az },
+        { "dtime", event.dtime },
+        { "value", event.value },
+        { "data", event.data },
         { "pos", event.pos }
     };
 }
 
 //! Parse an "event" shortcut payload built by ::json_event_payload.
 //! \param node Set to the payload's node name.
-//! \param event Set to the payload's event fields (utc/name/type/flag/el/az/pos).
+//! \param event Set to the payload's event fields (utc/name/type/flag/el/az/dtime/value/data/pos).
 //! \param s JSON string to parse.
 //! \return Zero if successful, negative error if the string didn't parse.
 int32_t json_event_payload_load(string &node, eventstruc &event, const string &s)
@@ -12317,6 +12320,9 @@ int32_t json_event_payload_load(string &node, eventstruc &event, const string &s
     if (!p["flag"].is_null()) { event.flag = p["flag"].long_value(); }
     if (!p["el"].is_null()) { event.el = p["el"].number_value(); }
     if (!p["az"].is_null()) { event.az = p["az"].number_value(); }
+    if (!p["dtime"].is_null()) { event.dtime = p["dtime"].number_value(); }
+    if (!p["value"].is_null()) { event.value = p["value"].number_value(); }
+    if (!p["data"].is_null()) { event.data = p["data"].string_value(); }
     if (!p["pos"].is_null()) { event.pos.from_json(p["pos"].dump()); }
     return 0;
 }
@@ -12333,6 +12339,7 @@ int32_t json_event_payload_load(string &node, eventstruc &event, const string &s
 json11::Json json_soh_payload(const cosmosstruc *cinfo)
 {
     bool ismoon = (cinfo->node.loc.pos.extra.closest == COSMOS_MOON);
+    bool hascpu = !cinfo->devspec.cpu.empty();
     return json11::Json::object {
         { "jtype", "soh" },
         { "utc", cinfo->node.utc },
@@ -12344,8 +12351,10 @@ json11::Json json_soh_payload(const cosmosstruc *cinfo)
         { "alphaatt", cinfo->node.loc.att.icrf },
         { "powerin", cinfo->node.phys.powgen },
         { "powerout", cinfo->node.phys.powuse },
-        { "load", cinfo->devspec.cpu[0].load / cinfo->devspec.cpu[0].maxload },
-        { "memory", cinfo->devspec.cpu[0].gib / cinfo->devspec.cpu[0].maxgib }
+        { "battcap", cinfo->node.phys.battcap },
+        { "battlev", cinfo->node.phys.battlev },
+        { "load", hascpu ? cinfo->devspec.cpu[0].load / cinfo->devspec.cpu[0].maxload : 0. },
+        { "memory", hascpu ? cinfo->devspec.cpu[0].gib / cinfo->devspec.cpu[0].maxgib : 0. }
     };
 }
 
@@ -12377,6 +12386,8 @@ int32_t json_soh_payload_load(cosmosstruc *cinfo, const string &s)
     if (!p["alphaatt"].is_null()) { cinfo->node.loc.att.icrf.from_json(p["alphaatt"].dump()); }
     if (!p["powerin"].is_null()) { cinfo->node.phys.powgen = p["powerin"].number_value(); }
     if (!p["powerout"].is_null()) { cinfo->node.phys.powuse = p["powerout"].number_value(); }
+    if (!p["battcap"].is_null()) { cinfo->node.phys.battcap = p["battcap"].number_value(); }
+    if (!p["battlev"].is_null()) { cinfo->node.phys.battlev = p["battlev"].number_value(); }
     for (size_t i = 0; i < p["pvstrg"].array_items().size(); ++i)
     {
         if (i >= cinfo->devspec.pvstrg.size()) { cinfo->devspec.pvstrg.emplace_back(); }

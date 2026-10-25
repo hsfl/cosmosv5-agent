@@ -29,6 +29,8 @@ uint16_t settle=0;
 uint16_t printevent=0;
 uint16_t jsonevent=0;
 uint16_t postevent=0;
+//! Write telemetry and events into the archive (<archive>/<realm>/<node>/telemetry/...)
+uint16_t archive=0;
 uint16_t batch=0;
 string outdir="";
 vector<vector<cosmosstruc>> results;
@@ -221,6 +223,16 @@ int main(int argc, char *argv[])
         delta[i].s.col[0] = 1.;
         settled[i] = false;
     }
+    // One telemetry and one event writer per node
+    vector<ArchiveLines> archivesoh, archiveevent;
+    if (archive)
+    {
+        for (uint16_t i=0; i<sim->cnodes.size(); ++i)
+        {
+            archivesoh.emplace_back(realmname, sim->cnodes[i]->currentinfo.node.name, "telemetry");
+            archiveevent.emplace_back(realmname, sim->cnodes[i]->currentinfo.node.name, "event");
+        }
+    }
     vector<vector<Physics::coverage>> summaries;
     summaries.resize(sim->cnodes.size() + 1);
     for (uint16_t i=0; i<sim->cnodes.size()+1; ++i)
@@ -363,6 +375,16 @@ int main(int argc, char *argv[])
                         string output = jobj.dump();
                         printf("%s\n", output.c_str());
                     }
+                    if (archive)
+                    {
+                        // Filed by the step that reported it, so the event may predate the file's first record
+                        iretn = archiveevent[i].Write(sim->cnodes[i]->currentinfo.node.utc, json_event_payload(sim->cnodes[i]->currentinfo.node.name, event).dump());
+                        if (iretn < 0)
+                        {
+                            fprintf(stderr, "Error writing event archive for %s: %s\n", sim->cnodes[i]->currentinfo.node.name.c_str(), cosmos_error_string(iretn).c_str());
+                            archive = 0;
+                        }
+                    }
                     if (postevent)
                     {
                         json11::Json jobj = json_event_payload(sim->cnodes[i]->currentinfo.node.name, event);
@@ -470,6 +492,15 @@ int main(int argc, char *argv[])
                        sim->cnodes[i]->currentinfo.node.loc.pos.lvlh.s.col[1],
                        sim->cnodes[i]->currentinfo.node.loc.pos.lvlh.s.col[2]);
                 printf("}\n");
+            }
+            if (archive)
+            {
+                iretn = archivesoh[i].Write(sim->cnodes[i]->currentinfo.node.utc, json_soh_payload(&sim->cnodes[i]->currentinfo).dump());
+                if (iretn < 0)
+                {
+                    fprintf(stderr, "Error writing telemetry archive for %s: %s\n", sim->cnodes[i]->currentinfo.node.name.c_str(), cosmos_error_string(iretn).c_str());
+                    archive = 0;
+                }
             }
             if (postevent)
             {
@@ -1515,6 +1546,11 @@ int32_t parse_control(string args)
     {
         ++argcount;
         postevent = jargs["postevent"].number_value();
+    }
+    if (!jargs["archive"].is_null())
+    {
+        ++argcount;
+        archive = jargs["archive"].number_value();
     }
     if (!jargs["runcount"].is_null())
     {
