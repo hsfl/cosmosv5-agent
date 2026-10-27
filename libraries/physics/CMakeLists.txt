@@ -17,9 +17,4 @@ add_library(CosmosSimulator STATIC simulatorclass.cpp simulatorclass.h)
 target_link_libraries(CosmosSimulator CosmosPhysics CosmosCommand CosmosConvert CosmosNamespace CosmosSupport ${COSMOS_LIBS})
 install(TARGETS CosmosSimulator DESTINATION lib)
 
-# l0simclass: pass 2 of simulated science data, archived tiles to L0 ENVI files
-add_library(CosmosL0Sim STATIC l0simclass.cpp l0simclass.h)
-target_link_libraries(CosmosL0Sim CosmosAgent CosmosConvert CosmosDem CosmosEnvi CosmosData CosmosSupport ${COSMOS_LIBS})
-install(TARGETS CosmosL0Sim DESTINATION lib)
-
 install(FILES ${INCLUDES} DESTINATION include/physics)

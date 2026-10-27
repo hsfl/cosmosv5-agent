@@ -1,6 +1,5 @@
 #include "support/configCosmos.h"
 #include "physics/simulatorclass.h"
-#include "physics/l0simclass.h"
 #include "agent/agentclass.h"
 #include "support/jsonclass.h"
 #include "device/cpu/devicecpu.h"
@@ -31,11 +30,6 @@ uint16_t settle=0;
 uint16_t printevent=0;
 uint16_t jsonevent=0;
 uint16_t postevent=0;
-//! Write telemetry and events into the archive (<archive>/<realm>/<node>/telemetry/...)
-uint16_t archive=0;
-//! Render the L0 data of the archived imaging tiles between the start and end (task 004 pass 2)
-uint16_t data=0;
-uint16_t dataoverwrite=0;
 //! Slew toward commanded attitudes (request_adcs point), as SOST does
 uint16_t torque=1;
 //! Attitude propagator: "lvlh" keeps commanded attitudes (as SOST), "iterative" integrates torques
@@ -257,16 +251,6 @@ int main(int argc, char *argv[])
         delta[i].s.col[0] = 1.;
         settled[i] = false;
     }
-    // One telemetry and one event writer per node
-    vector<ArchiveLines> archivesoh, archiveevent;
-    if (archive)
-    {
-        for (uint16_t i=0; i<sim->cnodes.size(); ++i)
-        {
-            archivesoh.emplace_back(realmname, sim->cnodes[i]->currentinfo.node.name, "telemetry");
-            archiveevent.emplace_back(realmname, sim->cnodes[i]->currentinfo.node.name, "event");
-        }
-    }
     vector<vector<Physics::coverage>> summaries;
     summaries.resize(sim->cnodes.size() + 1);
     for (uint16_t i=0; i<sim->cnodes.size()+1; ++i)
@@ -409,16 +393,6 @@ int main(int argc, char *argv[])
                         string output = jobj.dump();
                         printf("%s\n", output.c_str());
                     }
-                    if (archive)
-                    {
-                        // Filed by the step that reported it, so the event may predate the file's first record
-                        iretn = archiveevent[i].Write(sim->cnodes[i]->currentinfo.node.utc, json_event_payload(sim->cnodes[i]->currentinfo.node.name, event).dump());
-                        if (iretn < 0)
-                        {
-                            fprintf(stderr, "Error writing event archive for %s: %s\n", sim->cnodes[i]->currentinfo.node.name.c_str(), cosmos_error_string(iretn).c_str());
-                            archive = 0;
-                        }
-                    }
                     if (postevent)
                     {
                         json11::Json jobj = json_event_payload(sim->cnodes[i]->currentinfo.node.name, event);
@@ -526,15 +500,6 @@ int main(int argc, char *argv[])
                        sim->cnodes[i]->currentinfo.node.loc.pos.lvlh.s.col[1],
                        sim->cnodes[i]->currentinfo.node.loc.pos.lvlh.s.col[2]);
                 printf("}\n");
-            }
-            if (archive)
-            {
-                iretn = archivesoh[i].Write(sim->cnodes[i]->currentinfo.node.utc, json_soh_payload(&sim->cnodes[i]->currentinfo).dump());
-                if (iretn < 0)
-                {
-                    fprintf(stderr, "Error writing telemetry archive for %s: %s\n", sim->cnodes[i]->currentinfo.node.name.c_str(), cosmos_error_string(iretn).c_str());
-                    archive = 0;
-                }
             }
             if (postevent)
             {
@@ -1395,31 +1360,6 @@ int main(int argc, char *argv[])
 
     }
 
-    // Pass 2: from the archive, so it also runs alone with runcount 0
-    if (data)
-    {
-        double databegin = sim->initialutc;
-        double dataend = endutc > databegin ? endutc : sim->currentutc;
-        for (uint16_t i=0; i<sim->cnodes.size(); ++i)
-        {
-            string name = sim->cnodes[i]->currentinfo.node.name;
-            Physics::L0Sim l0;
-            if (l0.Load(realmname, name) < 0)
-            {
-                continue;
-            }
-            ElapsedTime et;
-            int32_t count = l0.Run(databegin, dataend, dataoverwrite != 0);
-            if (count < 0)
-            {
-                fprintf(stderr, "L0 %s: %s\n", name.c_str(), cosmos_error_string(count).c_str());
-            }
-            else
-            {
-                fprintf(stderr, "L0 %s: %d tiles from %.6f to %.6f in %.1f s\n", name.c_str(), count, databegin, dataend, et.split());
-            }
-        }
-    }
 }
 
 // Write one CSV per node/target of a position series taken from `results`, into outdir.
@@ -1580,10 +1520,6 @@ void print_usage(const char *program)
             "  realtime        1 = pace steps in real time as an agent, 0 = as fast as possible (default 1)\n"
             "  batch           1 = run all steps, then write results to outdir (default 0)\n"
             "  outdir          output directory for batch results\n"
-            "  archive         1 = write telemetry and events to the archive (default 0)\n"
-            "  data            1 = then render the L0 data of the archived tiles from initialutc to\n"
-            "                  endutc (default: the end of the run); with runcount 0, only that (default 0)\n"
-            "  dataoverwrite   1 = replace L0 files that already exist (default 0)\n"
             "  torque          1 = slew toward commanded attitudes (request_adcs point), 0 = hold (default 1)\n"
             "  attitude        attitude propagator: lvlh (keeps commanded attitudes, as SOST) or iterative\n"
             "                  (integrates torques) (default lvlh)\n"
@@ -1653,16 +1589,6 @@ int32_t parse_control(string args)
         ++argcount;
         postevent = jargs["postevent"].number_value();
     }
-    if (!jargs["archive"].is_null())
-    {
-        ++argcount;
-        archive = jargs["archive"].number_value();
-    }
-    if (!jargs["data"].is_null())
-    {
-        ++argcount;
-        data = jargs["data"].number_value();
-    }
     if (!jargs["attitude"].is_null())
     {
         ++argcount;
@@ -1672,11 +1598,6 @@ int32_t parse_control(string args)
     {
         ++argcount;
         torque = jargs["torque"].number_value();
-    }
-    if (!jargs["dataoverwrite"].is_null())
-    {
-        ++argcount;
-        dataoverwrite = jargs["dataoverwrite"].number_value();
     }
     if (!jargs["runcount"].is_null())
     {
