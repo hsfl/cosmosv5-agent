@@ -154,6 +154,9 @@ namespace Cosmos
             double dt;
             double dtj;
             bool fastcalc = true;
+            //! Attitude propagator for the nodes ParseSatFile() adds: Iterative integrates the
+            //! torques; LVLH keeps a commanded attitude (request_adcs point) from step to step, as SOST does
+            Propagator::Type sat_atype = Propagator::AttitudeIterative;
             bool   sso_enabled   = false;
             double sso_alt_m     = 0.;
             double sso_raan_rate = 0.;

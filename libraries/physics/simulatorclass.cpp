@@ -1038,7 +1038,7 @@ int32_t Simulator::ParseSatString(string args)
         }
         if (fastcalc && !flo_enabled)
         {
-            iretn = AddNode(nodename, type, Physics::Propagator::PositionTle, Physics::Propagator::AttitudeIterative, Physics::Propagator::Thermal, Physics::Propagator::Electrical, initialloc.tle, initialloc.att.icrf);
+            iretn = AddNode(nodename, type, Physics::Propagator::PositionTle, sat_atype, Physics::Propagator::Thermal, Physics::Propagator::Electrical, initialloc.tle, initialloc.att.icrf);
         }
         else
         {
@@ -1047,7 +1047,7 @@ int32_t Simulator::ParseSatString(string args)
             Physics::Propagator::Type ptype = flo_enabled
                 ? flo_ptype
                 : Physics::Propagator::PositionGaussJackson;
-            iretn = AddNode(nodename, type, ptype, Physics::Propagator::AttitudeIterative, Physics::Propagator::Thermal, Physics::Propagator::Electrical, initialloc.pos.eci, initialloc.att.icrf);
+            iretn = AddNode(nodename, type, ptype, sat_atype, Physics::Propagator::Thermal, Physics::Propagator::Electrical, initialloc.pos.eci, initialloc.att.icrf);
         }
     }
     else
@@ -1062,14 +1062,14 @@ int32_t Simulator::ParseSatString(string args)
         }
         if (fastcalc && !flo_enabled)
         {
-            iretn = AddNode(nodename, type, Physics::Propagator::PositionTle, Physics::Propagator::AttitudeIterative, Physics::Propagator::Thermal, Physics::Propagator::Electrical, satloc.tle, initialloc.att.icrf);
+            iretn = AddNode(nodename, type, Physics::Propagator::PositionTle, sat_atype, Physics::Propagator::Thermal, Physics::Propagator::Electrical, satloc.tle, initialloc.att.icrf);
         }
         else
         {
             Physics::Propagator::Type ptype = flo_enabled
                 ? flo_ptype
                 : Physics::Propagator::PositionGaussJackson;
-            iretn = AddNode(nodename, type, ptype, Physics::Propagator::AttitudeIterative, Physics::Propagator::Thermal, Physics::Propagator::Electrical, satloc.pos.eci, initialloc.att.icrf);
+            iretn = AddNode(nodename, type, ptype, sat_atype, Physics::Propagator::Thermal, Physics::Propagator::Electrical, satloc.pos.eci, initialloc.att.icrf);
         }
     }
 
