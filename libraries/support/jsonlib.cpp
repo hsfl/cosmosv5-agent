@@ -13927,7 +13927,9 @@ int32_t update_metrics(cosmosstruc *currentinfo)
     {
         return iretn;
     }
-    for (uint16_t id=0; id<currentinfo->devspec.cam.size(); ++id)
+    // targetstruc::cover has room for the first four cameras only
+    size_t camcount = std::min(currentinfo->devspec.cam.size(), sizeof(targetstruc::cover) / sizeof(targetstruc::cover[0]));
+    for (uint16_t id=0; id<camcount; ++id)
     {
         rvector boresight = transform_q(q_conjugate(currentinfo->node.loc.att.icrf.s),currentinfo->devspec.cam[id].los);
         double h = currentinfo->node.loc.pos.geod.s.h;

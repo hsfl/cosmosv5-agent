@@ -1888,11 +1888,29 @@ int32_t State::Init(string name, double idt, string stype, Propagator::Type ptyp
     //        currentinfo.devspec.xyzsen[currentinfo.device[currentinfo.pieces[iretn].cidx]->didx].align = q_irotate_for(rv_unitz(), rv_unity(), rv_unitz(), rv_unity());
 
 
-    // Detectors
-    json_createpiece(&currentinfo, "camera1", DeviceType::CAM);
-    json_createpiece(&currentinfo, "camera2", DeviceType::CAM);
-    json_createpiece(&currentinfo, "camera3", DeviceType::CAM);
-    json_createpiece(&currentinfo, "camera4", DeviceType::CAM);
+    // Detectors: a node file that defines its own cameras replaces the default four,
+    // since the overlay below can only add devices, not remove them
+    bool filecameras = false;
+    if (!overlay.empty())
+    {
+        string error;
+        json11::Json jfile = json11::Json::parse(overlay, error);
+        for (const json11::Json &jdev : jfile["devices"].array_items())
+        {
+            if (jdev["type"].long_value() == static_cast<long>(DeviceType::CAM))
+            {
+                filecameras = true;
+                break;
+            }
+        }
+    }
+    if (!filecameras)
+    {
+        json_createpiece(&currentinfo, "camera1", DeviceType::CAM);
+        json_createpiece(&currentinfo, "camera2", DeviceType::CAM);
+        json_createpiece(&currentinfo, "camera3", DeviceType::CAM);
+        json_createpiece(&currentinfo, "camera4", DeviceType::CAM);
+    }
     // for (camstruc det : dets)
     // {
     //     json_createpiece(&currentinfo, det.name, DeviceType::CAM);
