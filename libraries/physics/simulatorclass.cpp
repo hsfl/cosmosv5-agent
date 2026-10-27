@@ -1730,6 +1730,16 @@ int32_t Simulator::LoadQueue(string nodename, string filepath)
             cmd.set_command(jevent.dump());
             if (cmd.is_command())
             {
+                // The MED skips events with no color or priority; the executed event and
+                // its imaging tiles take their flag from here (red still marks a failure)
+                if (!(cmd.flag & EVENT_FLAG_COLOR))
+                {
+                    cmd.flag |= EVENT_FLAG_COLOR_GREEN;
+                }
+                if (!(cmd.flag & EVENT_FLAG_PRIORITY))
+                {
+                    cmd.flag |= 3 * EVENT_SCALE_PRIORITY;
+                }
                 queue->add_command(cmd);
             }
         }
