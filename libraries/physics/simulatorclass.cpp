@@ -1571,6 +1571,11 @@ int32_t Simulator::Reset()
 int32_t Simulator::Propagate(double nextutc, bool enablethrust, bool enabletorque)
 {
     int iretn = 0;
+    // Everything below is relative to the mother node, cnodes[0]
+    if (cnodes.empty())
+    {
+        return GENERAL_ERROR_EMPTY;
+    }
     if (nextutc == 0.)
     {
         currentutc += dtj;
@@ -2004,6 +2009,10 @@ void Simulator::ImagingTile(Physics::State &state, ImagingSession &session, bool
 
 int32_t Simulator::Propagate(vector<vector<cosmosstruc> > &results, uint32_t runcount)
 {
+    if (cnodes.empty())
+    {
+        return GENERAL_ERROR_EMPTY;
+    }
     vector<cosmosstruc> result;
     result.resize(cnodes.size());
     for (uint16_t i=0; i<cnodes.size(); ++i)

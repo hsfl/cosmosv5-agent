@@ -8,6 +8,7 @@
 
 
 int32_t parse_control(string args);
+void print_usage(const char *program);
 int32_t run_batch();
 int32_t request_get_sat_json(string &request, string &response, Agent *agent);
 int32_t request_get_node_json(string &request, string &response, Agent *agent);
@@ -72,7 +73,17 @@ int main(int argc, char *argv[])
 
     if (argc > 1)
     {
-        parse_control(argv[1]);
+        string arg = argv[1];
+        if (arg == "-h" || arg == "--help" || arg == "help")
+        {
+            print_usage(argv[0]);
+            exit(0);
+        }
+        if (parse_control(arg) < 0)
+        {
+            print_usage(argv[0]);
+            exit(JSON_ERROR_SCAN);
+        }
     }
 
     agent = new Agent(realmname, "", "propagate", 0., AGENTMAXBUFFER, true);
@@ -126,6 +137,20 @@ int main(int argc, char *argv[])
     sim->Init(simdt, realmname, initialutc_given ? initialutc : 0.);
     int32_t orbitret = sim->ParseOrbitFile(orbitfile);
     int32_t satret = sim->ParseSatFile(satfile);
+    if (sim->cnodes.empty())
+    {
+        string realmdir = get_realmdir(realmname, true);
+        string opath = orbitfile.empty() ? realmdir + "/orbit.dat" : orbitfile;
+        string spath = satfile.empty() ? realmdir + "/sats.dat" : satfile;
+        fprintf(stderr, "Error: no nodes loaded for realm \"%s\" (%s)\n", realmname.c_str(), realmdir.c_str());
+        fprintf(stderr, "  orbit file %s: %s\n", opath.c_str(), !data_isfile(opath) ? "not found"
+                : orbitret < 0 ? cosmos_error_string(orbitret).c_str() : "ok");
+        fprintf(stderr, "  sat file %s: %s\n", spath.c_str(), !data_isfile(spath) ? "not found"
+                : satret < 0 ? cosmos_error_string(satret).c_str() : satret == 0 ? "no nodes" : "ok");
+        print_usage(argv[0]);
+        agent->shutdown();
+        exit(GENERAL_ERROR_EMPTY);
+    }
 
     if (!dump.empty())
     {
@@ -1502,11 +1527,51 @@ int32_t run_batch()
     return 0;
 }
 
+//! Print the command line and the control keys
+void print_usage(const char *program)
+{
+    fprintf(stderr,
+            "Usage: %s ['{\"key\":value, ...}' | -h]\n"
+            "Propagates the nodes of a realm: <realm>/orbit.dat (initial orbit), <realm>/sats.dat\n"
+            "(nodes), <realm>/targets.json (targets) and ground-station nodes in <realm>/nodes.\n"
+            "The single argument is a JSON object; all keys are optional:\n"
+            "  realmname       realm to load (default \"propagate\")\n"
+            "  orbitfile       orbit file (default <realm>/orbit.dat)\n"
+            "  satfile         sat file (default <realm>/sats.dat)\n"
+            "  targetfile      target file (default <realm>/targets.json)\n"
+            "  initialutc      start time, MJD (default: the orbit file's epoch)\n"
+            "  simdt           step [s] (default 1)\n"
+            "  runcount        run length: seconds when realtime, else steps (default 1500)\n"
+            "  realtime        1 = pace steps in real time as an agent, 0 = as fast as possible (default 1)\n"
+            "  batch           1 = run all steps, then write results to outdir (default 0)\n"
+            "  outdir          output directory for batch results\n"
+            "  archive         1 = write telemetry and events to the archive (default 0)\n"
+            "  formation       formation for the child nodes (default \"hold\")\n"
+            "  spacing         formation spacing [m] (default 1000)\n"
+            "  pointing        pointing schedule file (utc,qx,qy,qz,qw,target,... per line)\n"
+            "  settle          1 = report when each child settles on its formation position (default 0)\n"
+            "  summarize       1 = write a per-target coverage summary at the end (default 0)\n"
+            "  printevent      1 = print events (default 0)\n"
+            "  jsonevent       1 = print the node shapes and states as JSON (default 0)\n"
+            "  postevent       1 = post events on the data socket (default 0)\n"
+            "  dump            node name: write its node files to the realm and exit\n"
+            "  cosmos_web_addr address to send telemetry to COSMOS Web\n"
+            "Example: %s '{\"realmname\":\"lunar\",\"simdt\":10,\"realtime\":0,\"runcount\":2880}'\n",
+            program, program);
+}
+
+//! Parse the JSON control argument
+//! \return Number of keys recognized, or negative if it is not a JSON object.
 int32_t parse_control(string args)
 {
     uint16_t argcount = 0;
     string estring;
     json11::Json jargs = json11::Json::parse(args, estring);
+    if (!estring.empty() || !jargs.is_object())
+    {
+        fprintf(stderr, "Error: the argument is not a JSON object%s%s\n", estring.empty() ? "" : ": ", estring.c_str());
+        return JSON_ERROR_SCAN;
+    }
     //    if (!jargs["thrustctl"].is_null())
     //    {
     //        ++argcount;
