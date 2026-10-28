@@ -2161,7 +2161,9 @@ int32_t Simulator::Target()
     for (uint16_t i=0; i<cnodes.size(); ++i)
     {
         Vector torque;
-        if (cnodes[i]->currentinfo.target_idx < cnodes[i]->currentinfo.target.size())
+        // Automatic pointing at the picked target, unless the node is commanded (request_adcs point)
+        bool commanded = attcommands.find(cnodes[i]->currentinfo.node.name) != attcommands.end();
+        if (!commanded && cnodes[i]->currentinfo.target_idx < cnodes[i]->currentinfo.target.size())
         {
             // torque = calc_control_torque(cnodes[i]->currentinfo.node.phys.maxtorque, cnodes[i]->currentinfo.node.phys.moi, cnodes[i]->currentinfo.target[cnodes[i]->currentinfo.target_idx].loc.att.icrf, cnodes[i]->currentinfo.node.loc.att.icrf);
             cnodes[i]->currentinfo.node.loc.att.icrf = cnodes[i]->currentinfo.target[cnodes[i]->currentinfo.target_idx].loc.att.icrf;
